@@ -9,7 +9,7 @@ pub mod types;
 
 use api::{api_client::ApiClient, BackrunMsg, TxFilter};
 
-struct Client<'a> {
+pub struct Client<'a> {
     target: &'a str,
     key: &'a str,
     client: ApiClient<Channel>,
