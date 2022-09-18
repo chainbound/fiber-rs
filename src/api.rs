@@ -32,6 +32,13 @@ pub struct BackrunMsg {
     #[prost(message, optional, tag="2")]
     pub tx: ::core::option::Option<super::eth::Transaction>,
 }
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RawBackrunMsg {
+    #[prost(string, tag="1")]
+    pub hash: ::prost::alloc::string::String,
+    #[prost(bytes="vec", tag="2")]
+    pub raw_tx: ::prost::alloc::vec::Vec<u8>,
+}
 /// Generated client implementations.
 pub mod api_client {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
@@ -195,6 +202,23 @@ pub mod api_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static("/api.API/Backrun");
+            self.inner.unary(request.into_request(), path, codec).await
+        }
+        pub async fn raw_backrun(
+            &mut self,
+            request: impl tonic::IntoRequest<super::RawBackrunMsg>,
+        ) -> Result<tonic::Response<super::TransactionResponse>, tonic::Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/api.API/RawBackrun");
             self.inner.unary(request.into_request(), path, codec).await
         }
     }

@@ -7,7 +7,7 @@ pub mod api;
 pub mod eth;
 pub mod types;
 
-use api::{api_client::ApiClient, BackrunMsg, TxFilter};
+use api::{api_client::ApiClient, TxFilter, BackrunMsg};
 
 pub struct Client<'a> {
     target: &'a str,
@@ -66,7 +66,7 @@ impl<'a> Client<'a> {
         Ok((res.get_ref().hash.to_owned(), res.get_ref().timestamp))
     }
 
-    /// sends a raw transaction signed transaction encoded as a byte slice.
+    /// sends a signed transaction encoded as a byte slice.
     pub async fn send_raw_transaction(
         &mut self,
         raw_tx: &[u8],
@@ -78,6 +78,24 @@ impl<'a> Client<'a> {
         req.metadata_mut()
             .append("x-api-key", self.key.parse().unwrap());
         let res = self.client.send_raw_transaction(req).await?;
+
+        Ok((res.get_ref().hash.to_owned(), res.get_ref().timestamp))
+    }
+
+    /// sends a raw transaction signed transaction encoded as a byte slice.
+    pub async fn raw_backrun_transaction(
+        &mut self,
+        hash: String,
+        raw_tx: &[u8],
+    ) -> Result<(String, i64), Box<dyn std::error::Error>> {
+        let mut req = Request::new(api::RawBackrunMsg {
+            hash: hash,
+            raw_tx: raw_tx.to_vec(),
+        });
+
+        req.metadata_mut()
+            .append("x-api-key", self.key.parse().unwrap());
+        let res = self.client.raw_backrun(req).await?;
 
         Ok((res.get_ref().hash.to_owned(), res.get_ref().timestamp))
     }
@@ -237,6 +255,7 @@ fn proto_to_tx(proto: Transaction) -> EthersTx {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ethers::{types::{TransactionRequest, Address, transaction::eip2718::TypedTransaction}, signers::{Signer, LocalWallet}};
     use futures_util::{pin_mut, StreamExt};
 
     #[tokio::test]
@@ -260,6 +279,35 @@ mod tests {
         assert_eq!(req.metadata().get("x-api-key").unwrap(), &"api_key");
     }
 
+
+    #[tokio::test]
+    async fn test_send_transaction() {
+        let target = "localhost:8080";
+        let mut client = Client::connect(target, "api_key").await.unwrap();
+
+        let tx: TypedTransaction = TransactionRequest::new()
+            .nonce(3)
+            .gas_price(1)
+            .gas(25000)
+            .to("b94f5374fce5edbc8e2a8697c15331677e6ebf0b".parse::<Address>().unwrap())
+            .value(10)
+            .data(vec![0x55, 0x44])
+            .chain_id(1)
+            .into();
+
+        let wallet: LocalWallet = "15bb7dd02dd8805338310f045ae9975aedb7c90285618bd2ecdc91db52170a90".parse().unwrap();
+
+        let sig = wallet.sign_transaction(&tx.clone()).await.unwrap();
+
+        let signed = tx.rlp_signed(&sig);
+
+        let res = client.send_raw_transaction(&signed).await.unwrap();
+
+        
+        println!("{:?}", res);
+
+    }
+
     #[tokio::test]
     async fn test_subscribe() {
         let target = "localhost:8080";
@@ -272,7 +320,7 @@ mod tests {
         println!("listening to txs");
 
         while let Some(value) = sub.next().await {
-            println!("{:#?}", value);
+            println!("{:#?}", value.hash);
         }
     }
 }
