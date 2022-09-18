@@ -1,0 +1,19 @@
+[package]
+name = "fiber-rs"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+prost = "0.11.0"
+tonic = "0.8"
+tokio = { version = "1.21.1", features = ["macros", "rt-multi-thread"] }
+ethers = "0.17.0"
+tokio-stream = "0.1.9"
+async-stream = "0.3.3"
+futures-core = "0.3.24"
+futures-util = "0.3.24"
+
+[build-dependencies]
+tonic-build = "0.8"

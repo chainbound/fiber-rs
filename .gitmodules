@@ -1,0 +1,3 @@
+[submodule "fiber-proto"]
+	path = fiber-proto
+	url = https://github.com/chainbound/fiber-proto
