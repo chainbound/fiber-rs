@@ -10,11 +10,11 @@ cargo add fiber-rs --git https://github.com/chainbound/fiber-rs
 
 ### Connecting
 ```rs
-use fiber_rs::{Client};
+use fiber::{Client};
 
 #[tokio::main]
 async fn main() {
-    let client = Client::connect("ENDPOINT_URL", "API_KEY").await.unwrap();
+    let mut client = Client::connect("ENDPOINT_URL", "API_KEY").await.unwrap();
 }
 ```
 
@@ -25,7 +25,7 @@ for every new transaction that's received.
 
 **Example:**
 ```rs
-use fiber_rs::{Client};
+use fiber::{Client};
 use futures_util::{pin_mut, StreamExt};
 
 #[tokio::main]
@@ -54,12 +54,11 @@ use ethers::{
     signers::{LocalWallet, Signer},
     types::{transaction::eip2718::TypedTransaction, Address, TransactionRequest}, utils::hex::ToHex,
 };
-
-use fiber_rs::Client;
+use fiber::Client;
 
 #[tokio::main]
 asyn fn main() {
-    let client = Client::connect("ENDPOINT_URL", "API_KEY").await.unwrap();
+    let mut client = Client::connect("ENDPOINT_URL", "API_KEY").await.unwrap();
 
     let tx: TypedTransaction = TransactionRequest::new()
         .nonce(3)
@@ -88,12 +87,11 @@ use ethers::{
     signers::{LocalWallet, Signer},
     types::{transaction::eip2718::TypedTransaction, Address, TransactionRequest}, utils::hex::ToHex,
 };
-
-use fiber_rs::Client;
+use fiber::Client;
 
 #[tokio::main]
 asyn fn main() {
-    let client = Client::connect("ENDPOINT_URL", "API_KEY").await.unwrap();
+    let mut client = Client::connect("ENDPOINT_URL", "API_KEY").await.unwrap();
 
     let tx: TypedTransaction = TransactionRequest::new()
         .nonce(3)

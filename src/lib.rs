@@ -9,21 +9,19 @@ pub mod types;
 
 use api::{api_client::ApiClient, TxFilter, BackrunMsg};
 
-pub struct Client<'a> {
-    target: &'a str,
-    key: &'a str,
+pub struct Client {
+    key: String,
     client: ApiClient<Channel>,
 }
 
-impl<'a> Client<'a> {
+impl Client {
     pub async fn connect(
-        target: &'a str,
-        api_key: &'a str,
-    ) -> Result<Client<'a>, Box<dyn std::error::Error>> {
-        let targetstr = "http://".to_owned() + target;
+        target: String,
+        api_key: String,
+    ) -> Result<Client, Box<dyn std::error::Error>> {
+        let targetstr = "http://".to_owned() + &target;
         let client = ApiClient::connect(targetstr.to_owned()).await?;
         Ok(Client {
-            target,
             client,
             key: api_key,
         })
@@ -261,12 +259,9 @@ mod tests {
     #[tokio::test]
     async fn connect() {
         // let target = "fiber-node.fly.dev:8080";
-        let target = "localhost:8080";
-        // let result = add(2, 2);
-        // assert_eq!(result, 4);
-        let client = Client::connect(target, "api_key").await.unwrap();
+        let target = String::from("localhost:8080");
+        let client = Client::connect(target, String::from("api_key")).await.unwrap();
         assert_eq!(client.key, "api_key");
-        assert_eq!(client.target, target);
     }
 
     #[test]
@@ -282,8 +277,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_send_transaction() {
-        let target = "localhost:8080";
-        let mut client = Client::connect(target, "api_key").await.unwrap();
+        let target = String::from("localhost:8080");
+        let mut client = Client::connect(target, String::from("api_key")).await.unwrap();
 
         let tx: TypedTransaction = TransactionRequest::new()
             .nonce(3)
@@ -310,8 +305,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_subscribe() {
-        let target = "localhost:8080";
-        let mut client = Client::connect(target, "api_key").await.unwrap();
+        let target = String::from("localhost:8080");
+        let mut client = Client::connect(target, String::from("api_key")).await.unwrap();
 
         println!("connected to client");
         let sub = client.subscribe_new_txs().await;
