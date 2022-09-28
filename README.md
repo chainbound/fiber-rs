@@ -10,7 +10,7 @@ cargo add fiber-rs --git https://github.com/chainbound/fiber-rs
 
 ### Connecting
 ```rs
-use fiber::{Client};
+use fiber::Client;
 
 #[tokio::main]
 async fn main() {
@@ -20,22 +20,20 @@ async fn main() {
 
 ### Subscriptions
 #### Transactions
-Subscribing to transactions will return an `async_stream.Stream`, yielding `ethers-rs.Transaction`
+Subscribing to transactions will return an `TxStream`, yielding `ethers.Transaction`
 for every new transaction that's received.
 
 **Example:**
 ```rs
-use fiber::{Client};
-use futures_util::{pin_mut, StreamExt};
+use fiber::Client;
 
 #[tokio::main]
 async fn main() {
     // Client needs to be mutable
     let mut client = Client::connect("ENDPOINT_URL", "API_KEY").await.unwrap();
 
-    let sub = client.subscribe_new_txs().await;
-    // Pin the value on the stack
-    pin_mut!(sub);
+    // No filter in this example
+    let mut sub = client.subscribe_new_txs(None).await;
 
     // Use the stream as an async iterator
     while let Some(tx) = sub.next().await {
