@@ -268,7 +268,7 @@ mod tests {
         types::{transaction::eip2718::TypedTransaction, Address, TransactionRequest},
     };
 
-    // #[tokio::test]
+    #[tokio::test]
     async fn connect() {
         // let target = "fiber-node.fly.dev:8080";
         let target = String::from("localhost:8080");
@@ -288,7 +288,7 @@ mod tests {
         assert_eq!(req.metadata().get("x-api-key").unwrap(), &"api_key");
     }
 
-    // #[tokio::test]
+    #[tokio::test]
     async fn test_send_transaction() {
         let target = String::from("localhost:8080");
         let mut client = Client::connect(target, String::from("api_key"))
