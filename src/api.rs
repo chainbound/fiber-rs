@@ -1,12 +1,12 @@
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TxFilter {
-    #[prost(string, tag="1")]
-    pub from: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub to: ::prost::alloc::string::String,
-    /// Value is 18 decimals, need bytes to store that much.
+    #[prost(bytes="vec", tag="1")]
+    pub from: ::prost::alloc::vec::Vec<u8>,
+    #[prost(bytes="vec", tag="2")]
+    pub to: ::prost::alloc::vec::Vec<u8>,
+    /// MethodID is the 4 bytes method identifier
     #[prost(bytes="vec", tag="3")]
-    pub value: ::prost::alloc::vec::Vec<u8>,
+    pub method_id: ::prost::alloc::vec::Vec<u8>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct BlockFilter {

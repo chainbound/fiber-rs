@@ -1,13 +1,26 @@
 use eth::Transaction;
 use ethers::types::{OtherFields, Transaction as EthersTx, U256};
-use futures_core::stream::Stream;
+use pin_project::pin_project;
 use tonic::{transport::Channel, Request};
 
 pub mod api;
 pub mod eth;
 pub mod types;
 
-use api::{api_client::ApiClient, TxFilter, BackrunMsg};
+use api::{api_client::ApiClient, BackrunMsg, TxFilter};
+
+#[pin_project]
+pub struct TxStream {
+    #[pin]
+    stream: tonic::codec::Streaming<Transaction>,
+}
+
+impl TxStream {
+    pub async fn next(&mut self) -> Option<EthersTx> {
+        let proto = self.stream.message().await.unwrap_or(None)?;
+        Some(proto_to_tx(proto))
+    }
+}
 
 pub struct Client {
     key: String,
@@ -100,29 +113,26 @@ impl Client {
 
     /// subscribes to new transactions. This function returns an async stream that needs
     /// to be pinned with futures_util::pin_mut, which can then be used to iterate over.
-    pub async fn subscribe_new_txs(&mut self) -> impl Stream<Item = EthersTx> {
-        // TODO: tx filtering
-        let mut req = Request::new(TxFilter {
-            from: String::new(),
-            to: String::new(),
-            value: vec![0],
+    pub async fn subscribe_new_txs(&mut self, filter: Option<TxFilter>) -> TxStream {
+        let f = filter.unwrap_or(TxFilter {
+            from: vec![],
+            to: vec![],
+            method_id: vec![],
         });
+
+        let mut req = Request::new(f);
 
         req.metadata_mut()
             .append("x-api-key", self.key.parse().unwrap());
 
-        let mut stream = self
+        let stream = self
             .client
             .subscribe_new_txs(req)
             .await
             .unwrap()
             .into_inner();
 
-        async_stream::stream! {
-            while let Some(proto) = stream.message().await.unwrap() {
-                yield proto_to_tx(proto);
-            }
-        }
+        TxStream { stream }
     }
 
     // subscribes to new blocks. This function returns an async stream that needs
@@ -253,14 +263,18 @@ fn proto_to_tx(proto: Transaction) -> EthersTx {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ethers::{types::{TransactionRequest, Address, transaction::eip2718::TypedTransaction}, signers::{Signer, LocalWallet}};
-    use futures_util::{pin_mut, StreamExt};
+    use ethers::{
+        signers::{LocalWallet, Signer},
+        types::{transaction::eip2718::TypedTransaction, Address, TransactionRequest},
+    };
 
-    #[tokio::test]
+    // #[tokio::test]
     async fn connect() {
         // let target = "fiber-node.fly.dev:8080";
         let target = String::from("localhost:8080");
-        let client = Client::connect(target, String::from("api_key")).await.unwrap();
+        let client = Client::connect(target, String::from("api_key"))
+            .await
+            .unwrap();
         assert_eq!(client.key, "api_key");
     }
 
@@ -274,23 +288,29 @@ mod tests {
         assert_eq!(req.metadata().get("x-api-key").unwrap(), &"api_key");
     }
 
-
-    #[tokio::test]
+    // #[tokio::test]
     async fn test_send_transaction() {
         let target = String::from("localhost:8080");
-        let mut client = Client::connect(target, String::from("api_key")).await.unwrap();
+        let mut client = Client::connect(target, String::from("api_key"))
+            .await
+            .unwrap();
 
         let tx: TypedTransaction = TransactionRequest::new()
             .nonce(3)
             .gas_price(1)
             .gas(25000)
-            .to("b94f5374fce5edbc8e2a8697c15331677e6ebf0b".parse::<Address>().unwrap())
+            .to("b94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                .parse::<Address>()
+                .unwrap())
             .value(10)
             .data(vec![0x55, 0x44])
             .chain_id(1)
             .into();
 
-        let wallet: LocalWallet = "15bb7dd02dd8805338310f045ae9975aedb7c90285618bd2ecdc91db52170a90".parse().unwrap();
+        let wallet: LocalWallet =
+            "15bb7dd02dd8805338310f045ae9975aedb7c90285618bd2ecdc91db52170a90"
+                .parse()
+                .unwrap();
 
         let sig = wallet.sign_transaction(&tx.clone()).await.unwrap();
 
@@ -298,19 +318,18 @@ mod tests {
 
         let res = client.send_raw_transaction(&signed).await.unwrap();
 
-        
         println!("{:?}", res);
-
     }
 
     #[tokio::test]
     async fn test_subscribe() {
         let target = String::from("localhost:8080");
-        let mut client = Client::connect(target, String::from("api_key")).await.unwrap();
+        let mut client = Client::connect(target, String::from("api_key"))
+            .await
+            .unwrap();
 
         println!("connected to client");
-        let sub = client.subscribe_new_txs().await;
-        pin_mut!(sub);
+        let mut sub = client.subscribe_new_txs(None).await;
 
         println!("listening to txs");
 
