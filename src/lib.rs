@@ -42,7 +42,7 @@ impl Client {
 
     /// sends a SIGNED transaction (e.g. v,r,s fields filled in). Returns hash and timestamp.
     pub async fn send_transaction(
-        &mut self,
+        &self,
         tx: EthersTx,
     ) -> Result<(String, i64), Box<dyn std::error::Error>> {
         let mut req = Request::new(tx_to_proto(tx));
@@ -51,14 +51,14 @@ impl Client {
         req.metadata_mut()
             .append("x-api-key", self.key.parse().unwrap());
 
-        let res = self.client.send_transaction(req).await?;
+        let res = self.client.clone().send_transaction(req).await?;
 
         Ok((res.get_ref().hash.to_owned(), res.get_ref().timestamp))
     }
 
     /// backruns a transaction (propagates them in a bundle for ensuring the correct sequence).
     pub async fn backrun_transaction(
-        &mut self,
+        &self,
         hash: String,
         tx: EthersTx,
     ) -> Result<(String, i64), Box<dyn std::error::Error>> {
@@ -72,14 +72,14 @@ impl Client {
         req.metadata_mut()
             .append("x-api-key", self.key.parse().unwrap());
 
-        let res = self.client.backrun(req).await?;
+        let res = self.client.clone().backrun(req).await?;
 
         Ok((res.get_ref().hash.to_owned(), res.get_ref().timestamp))
     }
 
     /// sends a signed transaction encoded as a byte slice.
     pub async fn send_raw_transaction(
-        &mut self,
+        &self,
         raw_tx: &[u8],
     ) -> Result<(String, i64), Box<dyn std::error::Error>> {
         let mut req = Request::new(api::RawTxMsg {
@@ -88,14 +88,14 @@ impl Client {
 
         req.metadata_mut()
             .append("x-api-key", self.key.parse().unwrap());
-        let res = self.client.send_raw_transaction(req).await?;
+        let res = self.client.clone().send_raw_transaction(req).await?;
 
         Ok((res.get_ref().hash.to_owned(), res.get_ref().timestamp))
     }
 
     /// sends a raw transaction signed transaction encoded as a byte slice.
     pub async fn raw_backrun_transaction(
-        &mut self,
+        &self,
         hash: String,
         raw_tx: &[u8],
     ) -> Result<(String, i64), Box<dyn std::error::Error>> {
@@ -106,7 +106,7 @@ impl Client {
 
         req.metadata_mut()
             .append("x-api-key", self.key.parse().unwrap());
-        let res = self.client.raw_backrun(req).await?;
+        let res = self.client.clone().raw_backrun(req).await?;
 
         Ok((res.get_ref().hash.to_owned(), res.get_ref().timestamp))
     }
