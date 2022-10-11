@@ -113,7 +113,7 @@ impl Client {
 
     /// subscribes to new transactions. This function returns an async stream that needs
     /// to be pinned with futures_util::pin_mut, which can then be used to iterate over.
-    pub async fn subscribe_new_txs(&mut self, filter: Option<TxFilter>) -> TxStream {
+    pub async fn subscribe_new_txs(&self, filter: Option<TxFilter>) -> TxStream {
         let f = filter.unwrap_or(TxFilter {
             from: vec![],
             to: vec![],
@@ -127,6 +127,7 @@ impl Client {
 
         let stream = self
             .client
+            .clone()
             .subscribe_new_txs(req)
             .await
             .unwrap()
