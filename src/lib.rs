@@ -292,7 +292,7 @@ mod tests {
     #[tokio::test]
     async fn test_send_transaction() {
         let target = String::from("localhost:8080");
-        let mut client = Client::connect(target, String::from("api_key"))
+        let client = Client::connect(target, String::from("api_key"))
             .await
             .unwrap();
 
@@ -325,7 +325,7 @@ mod tests {
     #[tokio::test]
     async fn test_subscribe() {
         let target = String::from("localhost:8080");
-        let mut client = Client::connect(target, String::from("api_key"))
+        let client = Client::connect(target, String::from("api_key"))
             .await
             .unwrap();
 
