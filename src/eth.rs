@@ -81,6 +81,15 @@ pub struct Transaction {
     pub s: ::prost::alloc::vec::Vec<u8>,
     #[prost(uint32, tag="15")]
     pub chain_id: u32,
+    #[prost(message, repeated, tag="16")]
+    pub access_list: ::prost::alloc::vec::Vec<AccessTuple>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct AccessTuple {
+    #[prost(bytes="vec", tag="1")]
+    pub address: ::prost::alloc::vec::Vec<u8>,
+    #[prost(bytes="vec", repeated, tag="2")]
+    pub storage_keys: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StoredTransaction {

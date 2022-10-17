@@ -1,5 +1,8 @@
 use eth::Transaction;
-use ethers::types::{OtherFields, Transaction as EthersTx, U256};
+use ethers::types::{
+    transaction::eip2930::{AccessList, AccessListItem},
+    OtherFields, Transaction as EthersTx, U256,
+};
 use pin_project::pin_project;
 use tonic::{transport::Channel, Request};
 
@@ -180,6 +183,27 @@ fn tx_to_proto(tx: EthersTx) -> Transaction {
     let mut s_bytes = [0];
     tx.s.to_big_endian(&mut s_bytes);
 
+    let acl = match tx.access_list {
+        Some(acl) => {
+            let mut new_acl: Vec<eth::AccessTuple> = Vec::new();
+            for tup in acl.0 {
+                let mut new_keys: Vec<Vec<u8>> = Vec::new();
+
+                for key in tup.storage_keys {
+                    new_keys.push(key.as_bytes().to_vec())
+                }
+
+                new_acl.push(eth::AccessTuple {
+                    address: tup.address.as_bytes().to_vec(),
+                    storage_keys: new_keys,
+                });
+            }
+
+            new_acl
+        }
+        _ => Vec::new(),
+    };
+
     Transaction {
         to: to,
         gas: tx.gas.as_u64(),
@@ -202,6 +226,7 @@ fn tx_to_proto(tx: EthersTx) -> Transaction {
         r: r_bytes.to_vec(),
         s: s_bytes.to_vec(),
         chain_id: tx.chain_id.unwrap_or(ethers::types::U256::zero()).as_u32(),
+        access_list: acl,
     }
 }
 
@@ -237,6 +262,27 @@ fn proto_to_tx(proto: Transaction) -> EthersTx {
         Some(proto.priority_fee.into())
     };
 
+    let mut acl: Option<AccessList> = None;
+    if proto.access_list.len() > 0 {
+        let mut new_acl: Vec<AccessListItem> = Vec::new();
+
+
+        for tup in proto.access_list {
+            let mut keys: Vec<ethers::types::H256> = Vec::new();
+
+            for key in tup.storage_keys {
+                keys.push(ethers::types::H256::from_slice(key.as_slice()))
+            }
+
+            new_acl.push(AccessListItem { 
+                address: ethers::types::H160::from_slice(tup.address.as_slice()), 
+                storage_keys: keys,
+            });
+        }
+
+        acl = Some(ethers::types::transaction::eip2930::AccessList(new_acl));
+    }
+
     EthersTx {
         hash: ethers::types::H256::from_slice(proto.hash.as_slice()),
         nonce: proto.nonce.into(),
@@ -253,7 +299,7 @@ fn proto_to_tx(proto: Transaction) -> EthersTx {
         r: r,
         s: s,
         transaction_type: tx_type,
-        access_list: None,
+        access_list: acl,
         max_priority_fee_per_gas: priority_fee,
         max_fee_per_gas: max_fee,
         chain_id: Some(proto.chain_id.into()),
@@ -272,11 +318,11 @@ mod tests {
     #[tokio::test]
     async fn connect() {
         // let target = "fiber-node.fly.dev:8080";
-        let target = String::from("localhost:8080");
-        let client = Client::connect(target, String::from("api_key"))
+        let target = String::from("ec2-15-237-72-111.eu-west-3.compute.amazonaws.com:8080");
+        let client = Client::connect(target, String::from("fiber/v0.0.2-alpha/28820807-4315-491c-bfbe-b38d9513b687"))
             .await
             .unwrap();
-        assert_eq!(client.key, "api_key");
+        assert_eq!(client.key, "fiber/v0.0.2-alpha/28820807-4315-491c-bfbe-b38d9513b687");
     }
 
     #[test]
@@ -289,43 +335,43 @@ mod tests {
         assert_eq!(req.metadata().get("x-api-key").unwrap(), &"api_key");
     }
 
-    #[tokio::test]
-    async fn test_send_transaction() {
-        let target = String::from("localhost:8080");
-        let client = Client::connect(target, String::from("api_key"))
-            .await
-            .unwrap();
+    // #[tokio::test]
+    // async fn test_send_transaction() {
+    //     let target = String::from("ec2-15-237-72-111.eu-west-3.compute.amazonaws.com:8080");
+    //     let client = Client::connect(target, String::from("fiber/v0.0.2-alpha/28820807-4315-491c-bfbe-b38d9513b687"))
+    //         .await
+    //         .unwrap();
 
-        let tx: TypedTransaction = TransactionRequest::new()
-            .nonce(3)
-            .gas_price(1)
-            .gas(25000)
-            .to("b94f5374fce5edbc8e2a8697c15331677e6ebf0b"
-                .parse::<Address>()
-                .unwrap())
-            .value(10)
-            .data(vec![0x55, 0x44])
-            .chain_id(1)
-            .into();
+    //     let tx: TypedTransaction = TransactionRequest::new()
+    //         .nonce(3)
+    //         .gas_price(1)
+    //         .gas(25000)
+    //         .to("b94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+    //             .parse::<Address>()
+    //             .unwrap())
+    //         .value(10)
+    //         .data(vec![0x55, 0x44])
+    //         .chain_id(1)
+    //         .into();
 
-        let wallet: LocalWallet =
-            "15bb7dd02dd8805338310f045ae9975aedb7c90285618bd2ecdc91db52170a90"
-                .parse()
-                .unwrap();
+    //     let wallet: LocalWallet =
+    //         "15bb7dd02dd8805338310f045ae9975aedb7c90285618bd2ecdc91db52170a90"
+    //             .parse()
+    //             .unwrap();
 
-        let sig = wallet.sign_transaction(&tx.clone()).await.unwrap();
+    //     let sig = wallet.sign_transaction(&tx.clone()).await.unwrap();
 
-        let signed = tx.rlp_signed(&sig);
+    //     let signed = tx.rlp_signed(&sig);
 
-        let res = client.send_raw_transaction(&signed).await.unwrap();
+    //     let res = client.send_raw_transaction(&signed).await.unwrap();
 
-        println!("{:?}", res);
-    }
+    //     println!("{:?}", res);
+    // }
 
     #[tokio::test]
     async fn test_subscribe() {
-        let target = String::from("localhost:8080");
-        let client = Client::connect(target, String::from("api_key"))
+        let target = String::from("ec2-15-237-72-111.eu-west-3.compute.amazonaws.com:8080");
+        let client = Client::connect(target, String::from("fiber/v0.0.2-alpha/28820807-4315-491c-bfbe-b38d9513b687"))
             .await
             .unwrap();
 
@@ -335,7 +381,12 @@ mod tests {
         println!("listening to txs");
 
         while let Some(value) = sub.next().await {
-            println!("{:#?}", value.hash);
+                    // println!("{:#?}", value.hash);
+            if let Some(acl) = value.access_list {
+                if acl.0.len() > 0 {
+                    println!("{:#?}", value.hash);
+                }
+            }
         }
     }
 }
