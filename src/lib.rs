@@ -335,38 +335,38 @@ mod tests {
         assert_eq!(req.metadata().get("x-api-key").unwrap(), &"api_key");
     }
 
-    // #[tokio::test]
-    // async fn test_send_transaction() {
-    //     let target = String::from("ec2-15-237-72-111.eu-west-3.compute.amazonaws.com:8080");
-    //     let client = Client::connect(target, String::from("fiber/v0.0.2-alpha/28820807-4315-491c-bfbe-b38d9513b687"))
-    //         .await
-    //         .unwrap();
+    #[tokio::test]
+    async fn test_send_transaction() {
+        let target = String::from("ec2-15-237-72-111.eu-west-3.compute.amazonaws.com:8080");
+        let client = Client::connect(target, String::from("fiber/v0.0.2-alpha/28820807-4315-491c-bfbe-b38d9513b687"))
+            .await
+            .unwrap();
 
-    //     let tx: TypedTransaction = TransactionRequest::new()
-    //         .nonce(3)
-    //         .gas_price(1)
-    //         .gas(25000)
-    //         .to("b94f5374fce5edbc8e2a8697c15331677e6ebf0b"
-    //             .parse::<Address>()
-    //             .unwrap())
-    //         .value(10)
-    //         .data(vec![0x55, 0x44])
-    //         .chain_id(1)
-    //         .into();
+        let tx: TypedTransaction = TransactionRequest::new()
+            .nonce(3)
+            .gas_price(1)
+            .gas(25000)
+            .to("b94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                .parse::<Address>()
+                .unwrap())
+            .value(10)
+            .data(vec![0x55, 0x44])
+            .chain_id(1)
+            .into();
 
-    //     let wallet: LocalWallet =
-    //         "15bb7dd02dd8805338310f045ae9975aedb7c90285618bd2ecdc91db52170a90"
-    //             .parse()
-    //             .unwrap();
+        let wallet: LocalWallet =
+            "15bb7dd02dd8805338310f045ae9975aedb7c90285618bd2ecdc91db52170a90"
+                .parse()
+                .unwrap();
 
-    //     let sig = wallet.sign_transaction(&tx.clone()).await.unwrap();
+        let sig = wallet.sign_transaction(&tx.clone()).await.unwrap();
 
-    //     let signed = tx.rlp_signed(&sig);
+        let signed = tx.rlp_signed(&sig);
 
-    //     let res = client.send_raw_transaction(&signed).await.unwrap();
+        let res = client.send_raw_transaction(&signed).await.unwrap();
 
-    //     println!("{:?}", res);
-    // }
+        println!("{:?}", res);
+    }
 
     #[tokio::test]
     async fn test_subscribe() {
