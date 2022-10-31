@@ -9,6 +9,11 @@ pub struct TxFilter {
     pub method_id: ::prost::alloc::vec::Vec<u8>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
+pub struct TxFilterV2 {
+    #[prost(bytes="vec", tag="1")]
+    pub encoded: ::prost::alloc::vec::Vec<u8>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct BlockFilter {
     #[prost(string, tag="1")]
     pub producer: ::prost::alloc::string::String,
@@ -128,6 +133,28 @@ pub mod api_client {
             let path = http::uri::PathAndQuery::from_static("/api.API/SubscribeNewTxs");
             self.inner.server_streaming(request.into_request(), path, codec).await
         }
+        pub async fn subscribe_new_txs_v2(
+            &mut self,
+            request: impl tonic::IntoRequest<super::TxFilterV2>,
+        ) -> Result<
+            tonic::Response<tonic::codec::Streaming<super::super::eth::Transaction>>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/api.API/SubscribeNewTxsV2",
+            );
+            self.inner.server_streaming(request.into_request(), path, codec).await
+        }
         pub async fn subscribe_new_blocks(
             &mut self,
             request: impl tonic::IntoRequest<super::BlockFilter>,
@@ -220,6 +247,93 @@ pub mod api_client {
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static("/api.API/RawBackrun");
             self.inner.unary(request.into_request(), path, codec).await
+        }
+        pub async fn send_transaction_stream(
+            &mut self,
+            request: impl tonic::IntoStreamingRequest<
+                Message = super::super::eth::Transaction,
+            >,
+        ) -> Result<
+            tonic::Response<tonic::codec::Streaming<super::TransactionResponse>>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/api.API/SendTransactionStream",
+            );
+            self.inner.streaming(request.into_streaming_request(), path, codec).await
+        }
+        pub async fn send_raw_transaction_stream(
+            &mut self,
+            request: impl tonic::IntoStreamingRequest<Message = super::RawTxMsg>,
+        ) -> Result<
+            tonic::Response<tonic::codec::Streaming<super::TransactionResponse>>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/api.API/SendRawTransactionStream",
+            );
+            self.inner.streaming(request.into_streaming_request(), path, codec).await
+        }
+        /// Backrun is the RPC method for backrunning a transaction.
+        pub async fn backrun_stream(
+            &mut self,
+            request: impl tonic::IntoStreamingRequest<Message = super::BackrunMsg>,
+        ) -> Result<
+            tonic::Response<tonic::codec::Streaming<super::TransactionResponse>>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/api.API/BackrunStream");
+            self.inner.streaming(request.into_streaming_request(), path, codec).await
+        }
+        pub async fn raw_backrun_stream(
+            &mut self,
+            request: impl tonic::IntoStreamingRequest<Message = super::RawBackrunMsg>,
+        ) -> Result<
+            tonic::Response<tonic::codec::Streaming<super::TransactionResponse>>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/api.API/RawBackrunStream");
+            self.inner.streaming(request.into_streaming_request(), path, codec).await
         }
     }
 }

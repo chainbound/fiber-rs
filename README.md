@@ -30,7 +30,7 @@ use fiber::Client;
 #[tokio::main]
 async fn main() {
     // Client needs to be mutable
-    let mut client = Client::connect("ENDPOINT_URL", "API_KEY").await.unwrap();
+    let mut client = Client::connect("ENDPOINT_URL".to_string(), "API_KEY".to_string()).await.unwrap();
 
     // No filter in this example
     let mut sub = client.subscribe_new_txs(None).await;
@@ -42,6 +42,49 @@ async fn main() {
 }
 
 ```
+
+#### Filtering
+You can apply filters to the transaction stream using `fiber::filter::Filter`. The builder pattern is used
+for constructing a filter, with a couple of examples below.
+```rs
+use fiber::{Client, filter::Filter};
+
+#[tokio::main]
+async fn main() {
+    // Client needs to be mutable
+    let mut client = Client::connect("ENDPOINT_URL".to_string(), "API_KEY".to_string()).await.unwrap();
+
+    // Construct filter
+    // example 1: simple receiver filter
+    let f = Filter::new()
+                .to("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D")
+                .build(); // Don't forget to build the filter.
+    
+    // example 2: all transactions with either of these addresses as the receiver
+    let f = Filter::new()
+                .or() // creates a new 'OR' level
+                  .to("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+                  .to("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D")
+                  .build();
+
+    // example 3: all ERC20 transfers on the 2 tokens below
+    let f = Filter::new()
+                .and()
+                  .method_id("0xa9059cbb")
+                  .or()
+                    .to("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+                    .to("0xdAC17F958D2ee523a2206206994597C13D831ec7")
+                    .build();
+
+    // No filter in this example
+    let mut sub = client.subscribe_new_txs(f).await;
+
+    // Use the stream as an async iterator
+    while let Some(tx) = sub.next().await {
+        handle_transaction(tx);
+    }
+}
+
 #### Blocks
 WIP
 
@@ -56,7 +99,7 @@ use fiber::Client;
 
 #[tokio::main]
 asyn fn main() {
-    let mut client = Client::connect("ENDPOINT_URL", "API_KEY").await.unwrap();
+    let mut client = Client::connect("ENDPOINT_URL".to_string(), "API_KEY".to_string()).await.unwrap();
 
     let tx: TypedTransaction = TransactionRequest::new()
         .nonce(3)
@@ -89,7 +132,7 @@ use fiber::Client;
 
 #[tokio::main]
 asyn fn main() {
-    let mut client = Client::connect("ENDPOINT_URL", "API_KEY").await.unwrap();
+    let mut client = Client::connect("ENDPOINT_URL".to_string(), "API_KEY".to_string()).await.unwrap();
 
     let tx: TypedTransaction = TransactionRequest::new()
         .nonce(3)

@@ -3,14 +3,16 @@ use ethers::types::{
     transaction::eip2930::{AccessList, AccessListItem},
     OtherFields, Transaction as EthersTx, U256,
 };
+use filter::Filter;
 use pin_project::pin_project;
 use tonic::{transport::Channel, Request};
 
 pub mod api;
 pub mod eth;
+pub mod filter;
 pub mod types;
 
-use api::{api_client::ApiClient, BackrunMsg, TxFilter};
+use api::{api_client::ApiClient, BackrunMsg, TxFilterV2};
 
 #[pin_project]
 pub struct TxStream {
@@ -116,12 +118,13 @@ impl Client {
 
     /// subscribes to new transactions. This function returns an async stream that needs
     /// to be pinned with futures_util::pin_mut, which can then be used to iterate over.
-    pub async fn subscribe_new_txs(&self, filter: Option<TxFilter>) -> TxStream {
-        let f = filter.unwrap_or(TxFilter {
-            from: vec![],
-            to: vec![],
-            method_id: vec![],
-        });
+    pub async fn subscribe_new_txs(&self, filter: Option<Filter>) -> TxStream {
+        let f = match filter {
+            Some(filter_opt) => TxFilterV2 {
+                encoded: filter_opt.encode().unwrap(),
+            },
+            None => TxFilterV2 { encoded: vec![] },
+        };
 
         let mut req = Request::new(f);
 
@@ -131,7 +134,7 @@ impl Client {
         let stream = self
             .client
             .clone()
-            .subscribe_new_txs(req)
+            .subscribe_new_txs_v2(req)
             .await
             .unwrap()
             .into_inner();
@@ -266,7 +269,6 @@ fn proto_to_tx(proto: Transaction) -> EthersTx {
     if proto.access_list.len() > 0 {
         let mut new_acl: Vec<AccessListItem> = Vec::new();
 
-
         for tup in proto.access_list {
             let mut keys: Vec<ethers::types::H256> = Vec::new();
 
@@ -274,8 +276,8 @@ fn proto_to_tx(proto: Transaction) -> EthersTx {
                 keys.push(ethers::types::H256::from_slice(key.as_slice()))
             }
 
-            new_acl.push(AccessListItem { 
-                address: ethers::types::H160::from_slice(tup.address.as_slice()), 
+            new_acl.push(AccessListItem {
+                address: ethers::types::H160::from_slice(tup.address.as_slice()),
                 storage_keys: keys,
             });
         }
@@ -309,6 +311,8 @@ fn proto_to_tx(proto: Transaction) -> EthersTx {
 
 #[cfg(test)]
 mod tests {
+    use crate::filter::Filter;
+
     use super::*;
     use ethers::{
         signers::{LocalWallet, Signer},
@@ -318,11 +322,17 @@ mod tests {
     #[tokio::test]
     async fn connect() {
         // let target = "fiber-node.fly.dev:8080";
-        let target = String::from("ec2-15-237-72-111.eu-west-3.compute.amazonaws.com:8080");
-        let client = Client::connect(target, String::from("fiber/v0.0.2-alpha/28820807-4315-491c-bfbe-b38d9513b687"))
-            .await
-            .unwrap();
-        assert_eq!(client.key, "fiber/v0.0.2-alpha/28820807-4315-491c-bfbe-b38d9513b687");
+        let target = String::from("localhost:8080");
+        let client = Client::connect(
+            target,
+            String::from("fiber/v0.0.2-alpha/28820807-4315-491c-bfbe-b38d9513b687"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            client.key,
+            "fiber/v0.0.2-alpha/28820807-4315-491c-bfbe-b38d9513b687"
+        );
     }
 
     #[test]
@@ -337,10 +347,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_send_transaction() {
-        let target = String::from("ec2-15-237-72-111.eu-west-3.compute.amazonaws.com:8080");
-        let client = Client::connect(target, String::from("fiber/v0.0.2-alpha/28820807-4315-491c-bfbe-b38d9513b687"))
-            .await
-            .unwrap();
+        let target = String::from("localhost:8080");
+        let client = Client::connect(
+            target,
+            String::from("fiber/v0.0.2-alpha/28820807-4315-491c-bfbe-b38d9513b687"),
+        )
+        .await
+        .unwrap();
 
         let tx: TypedTransaction = TransactionRequest::new()
             .nonce(3)
@@ -370,18 +383,31 @@ mod tests {
 
     #[tokio::test]
     async fn test_subscribe() {
-        let target = String::from("ec2-15-237-72-111.eu-west-3.compute.amazonaws.com:8080");
-        let client = Client::connect(target, String::from("fiber/v0.0.2-alpha/28820807-4315-491c-bfbe-b38d9513b687"))
-            .await
-            .unwrap();
+        let target = String::from("localhost:8080");
+        let client = Client::connect(
+            target,
+            String::from("fiber/v0.0.2-alpha/28820807-4315-491c-bfbe-b38d9513b687"),
+        )
+        .await
+        .unwrap();
 
         println!("connected to client");
-        let mut sub = client.subscribe_new_txs(None).await;
+        let f = Filter::new()
+            // .and()
+            // .method_id("0xa9059cbb")
+            // .or()
+            // .to("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+            .to("0xdAC17F958D2ee523a2206206994597C13D831ec7")
+            .build();
+        // .value(U256::from_dec_str("10000000000000000000").unwrap()).build();
+        // .to("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D").build();
+        let mut sub = client.subscribe_new_txs(Some(f)).await;
 
         println!("listening to txs");
 
         while let Some(value) = sub.next().await {
-                    // println!("{:#?}", value.hash);
+            println!("{:#?}", value.hash);
+            println!("{:#?}", value.to);
             if let Some(acl) = value.access_list {
                 if acl.0.len() > 0 {
                     println!("{:#?}", value.hash);
