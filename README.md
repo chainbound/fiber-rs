@@ -84,6 +84,7 @@ async fn main() {
         handle_transaction(tx);
     }
 }
+```
 
 #### Blocks
 WIP
