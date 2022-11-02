@@ -57,15 +57,13 @@ async fn main() {
     // Construct filter
     // example 1: simple receiver filter
     let f = Filter::new()
-                .to("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D")
-                .build(); // Don't forget to build the filter.
+                .to("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D");
     
     // example 2: all transactions with either of these addresses as the receiver
     let f = Filter::new()
                 .or() // creates a new 'OR' level
                   .to("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
-                  .to("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D")
-                  .build();
+                  .to("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D");
 
     // example 3: all ERC20 transfers on the 2 tokens below
     let f = Filter::new()
@@ -73,11 +71,10 @@ async fn main() {
                   .method_id("0xa9059cbb")
                   .or()
                     .to("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
-                    .to("0xdAC17F958D2ee523a2206206994597C13D831ec7")
-                    .build();
+                    .to("0xdAC17F958D2ee523a2206206994597C13D831ec7");
 
-    // No filter in this example
-    let mut sub = client.subscribe_new_txs(f).await;
+    // Encode the filter
+    let mut sub = client.subscribe_new_txs(f.encode().unwrap()).await;
 
     // Use the stream as an async iterator
     while let Some(tx) = sub.next().await {

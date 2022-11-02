@@ -17,10 +17,13 @@ pub enum Operator {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all(serialize = "PascalCase"))]
 pub struct Filter {
+    pub root: Node,
+}
+
+#[derive(Clone, Debug)]
+pub struct FilterBuilder {
     pub root: Option<NodeRef>,
-    #[serde(skip_serializing)]
     next: Option<NodeRef>,
-    #[serde(skip_serializing)]
     last: Option<NodeRef>,
 }
 
@@ -54,16 +57,16 @@ mod base64 {
     }
 }
 
-impl Filter {
-    pub fn new() -> Filter {
-        Filter {
+impl FilterBuilder {
+    pub fn new() -> FilterBuilder {
+        FilterBuilder {
             root: None,
             next: None,
             last: None,
         }
     }
 
-    pub fn to<'a>(&'a mut self, to: &'a str) -> &'a mut Filter {
+    pub fn to<'a>(&'a mut self, to: &'a str) -> &'a mut FilterBuilder {
         let addr: Address = to.parse().unwrap();
         let new = Rc::new(RefCell::new(Node {
             operand: Some(FilterKV {
@@ -98,7 +101,7 @@ impl Filter {
         self
     }
 
-    pub fn from<'a>(&'a mut self, from: &'a str) -> &'a mut Filter {
+    pub fn from<'a>(&'a mut self, from: &'a str) -> &'a mut FilterBuilder {
         let addr: Address = from.parse().unwrap();
         let new = Rc::new(RefCell::new(Node {
             operand: Some(FilterKV {
@@ -133,7 +136,7 @@ impl Filter {
         self
     }
 
-    pub fn method_id<'a>(&'a mut self, id: &'a str) -> &'a mut Filter {
+    pub fn method_id<'a>(&'a mut self, id: &'a str) -> &'a mut FilterBuilder {
         let method_id: Bytes = id.parse().unwrap();
         let new = Rc::new(RefCell::new(Node {
             operand: Some(FilterKV {
@@ -168,7 +171,7 @@ impl Filter {
         self
     }
 
-    pub fn value<'a>(&'a mut self, v: U256) -> &'a mut Filter {
+    pub fn value<'a>(&'a mut self, v: U256) -> &'a mut FilterBuilder {
         let bytes = from_u256(v);
         let new = Rc::new(RefCell::new(Node {
             operand: Some(FilterKV {
@@ -206,7 +209,7 @@ impl Filter {
     // Creates and AND node and enters it (i.e. anything after this will be appended)
     // as a child of this node. A reference to the last node will be saved in `last`, and you
     // can re-enter that level using `exit()`.
-    pub fn and<'a>(&'a mut self) -> &'a mut Filter {
+    pub fn and<'a>(&'a mut self) -> &'a mut FilterBuilder {
         let new = Rc::new(RefCell::new(Node {
             operand: None,
             operator: Some(Operator::AND),
@@ -243,7 +246,7 @@ impl Filter {
     // Creates and OR node and enters it (i.e. anything after this will be appended)
     // as a child of this node. A reference to the last node will be saved in `last`, and you
     // can re-enter that level using `exit()`.
-    pub fn or<'a>(&'a mut self) -> &'a mut Filter {
+    pub fn or<'a>(&'a mut self) -> &'a mut FilterBuilder {
         let new = Rc::new(RefCell::new(Node {
             operand: None,
             operator: Some(Operator::OR),
@@ -280,21 +283,25 @@ impl Filter {
 
     /// next tells the builder to create a child at the current `next` pointer
     /// and move there.
-    pub fn exit<'a>(&'a mut self) -> &'a mut Filter {
+    pub fn exit<'a>(&'a mut self) -> &'a mut FilterBuilder {
         self.next = self.last.clone();
         self
     }
 
     pub fn encode(&self) -> Result<Vec<u8>, serde_json::Error> {
-        serde_json::to_vec(self)
+        let f = Filter {
+            root: self.root.as_deref().unwrap().borrow().to_owned(),
+        };
+
+        serde_json::to_vec(&f)
     }
 
     pub fn encode_pretty(&self) -> Result<String, serde_json::Error> {
-        serde_json::to_string_pretty(self)
-    }
+        let f = Filter {
+            root: self.root.as_deref().unwrap().borrow().to_owned(),
+        };
 
-    pub fn build(&self) -> Filter {
-        self.to_owned()
+        serde_json::to_string_pretty(&f)
     }
 }
 
@@ -314,7 +321,7 @@ mod tests {
     #[test]
     fn test_new() {
         let val = U256::from(10000);
-        let mut f = Filter::new();
+        let mut f = FilterBuilder::new();
         let new = f.value(val);
         // .and()
         // .to("0x7a250d5630B4cF539739dF2C5dAcb4c659F24ABC")

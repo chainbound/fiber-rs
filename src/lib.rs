@@ -3,7 +3,6 @@ use ethers::types::{
     transaction::eip2930::{AccessList, AccessListItem},
     OtherFields, Transaction as EthersTx, U256,
 };
-use filter::Filter;
 use pin_project::pin_project;
 use tonic::{transport::Channel, Request};
 
@@ -118,10 +117,10 @@ impl Client {
 
     /// subscribes to new transactions. This function returns an async stream that needs
     /// to be pinned with futures_util::pin_mut, which can then be used to iterate over.
-    pub async fn subscribe_new_txs(&self, filter: Option<Filter>) -> TxStream {
+    pub async fn subscribe_new_txs(&self, filter: Option<Vec<u8>>) -> TxStream {
         let f = match filter {
-            Some(filter_opt) => TxFilterV2 {
-                encoded: filter_opt.encode().unwrap(),
+            Some(encoded_filter) => TxFilterV2 {
+                encoded: encoded_filter,
             },
             None => TxFilterV2 { encoded: vec![] },
         };
@@ -311,7 +310,7 @@ fn proto_to_tx(proto: Transaction) -> EthersTx {
 
 #[cfg(test)]
 mod tests {
-    use crate::filter::Filter;
+    use crate::filter::FilterBuilder;
 
     use super::*;
     use ethers::{
@@ -392,13 +391,13 @@ mod tests {
         .unwrap();
 
         println!("connected to client");
-        let f = Filter::new()
+        let f = FilterBuilder::new()
             // .and()
             // .method_id("0xa9059cbb")
             // .or()
             // .to("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
             .to("0xdAC17F958D2ee523a2206206994597C13D831ec7")
-            .build();
+            .encode().unwrap();
         // .value(U256::from_dec_str("10000000000000000000").unwrap()).build();
         // .to("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D").build();
         let mut sub = client.subscribe_new_txs(Some(f)).await;
