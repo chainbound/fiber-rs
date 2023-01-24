@@ -30,9 +30,12 @@ pub struct FilterBuilder {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all(serialize = "PascalCase"))]
 pub struct Node {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub operand: Option<FilterKV>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub operator: Option<Operator>,
-    pub nodes: Option<Vec<NodeRef>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub children: Option<Vec<NodeRef>>,
 }
 
 type NodeRef = Rc<RefCell<Node>>;
@@ -74,21 +77,21 @@ impl FilterBuilder {
                 value: addr.as_bytes().to_vec(),
             }),
             operator: None,
-            nodes: None,
+            children: None,
         }));
 
         match &mut self.root {
             // If there's a root already, append this op to `next`'s children
             Some(_) => {
                 let mut next = self.next.as_ref().unwrap().borrow_mut();
-                match &mut next.nodes {
+                match &mut next.children {
                     Some(children) => {
                         children.push(new);
                     }
                     None => {
                         let mut v = Vec::new();
                         v.push(new);
-                        next.nodes = Some(v);
+                        next.children = Some(v);
                     }
                 }
             }
@@ -109,21 +112,21 @@ impl FilterBuilder {
                 value: addr.as_bytes().to_vec(),
             }),
             operator: None,
-            nodes: None,
+            children: None,
         }));
 
         match &mut self.root {
             // If there's a root already, append this op to `next`'s children
             Some(_) => {
                 let mut next = self.next.as_ref().unwrap().borrow_mut();
-                match &mut next.nodes {
+                match &mut next.children {
                     Some(children) => {
                         children.push(new);
                     }
                     None => {
                         let mut v = Vec::new();
                         v.push(new);
-                        next.nodes = Some(v);
+                        next.children = Some(v);
                     }
                 }
             }
@@ -144,21 +147,21 @@ impl FilterBuilder {
                 value: method_id.to_vec(),
             }),
             operator: None,
-            nodes: None,
+            children: None,
         }));
 
         match &mut self.root {
             // If there's a root already, append this op to `next`'s children
             Some(_) => {
                 let mut next = self.next.as_ref().unwrap().borrow_mut();
-                match &mut next.nodes {
+                match &mut next.children {
                     Some(children) => {
                         children.push(new);
                     }
                     None => {
                         let mut v = Vec::new();
                         v.push(new);
-                        next.nodes = Some(v);
+                        next.children = Some(v);
                     }
                 }
             }
@@ -179,21 +182,21 @@ impl FilterBuilder {
                 value: bytes,
             }),
             operator: None,
-            nodes: None,
+            children: None,
         }));
 
         match &mut self.root {
             // If there's a root already, append this op to `next`'s children
             Some(_) => {
                 let mut next = self.next.as_ref().unwrap().borrow_mut();
-                match &mut next.nodes {
+                match &mut next.children {
                     Some(children) => {
                         children.push(new);
                     }
                     None => {
                         let mut v = Vec::new();
                         v.push(new);
-                        next.nodes = Some(v);
+                        next.children = Some(v);
                     }
                 }
             }
@@ -213,7 +216,7 @@ impl FilterBuilder {
         let new = Rc::new(RefCell::new(Node {
             operand: None,
             operator: Some(Operator::AND),
-            nodes: None,
+            children: None,
         }));
 
         match &mut self.root {
@@ -221,14 +224,14 @@ impl FilterBuilder {
                 // If there's a root already, append this op to `next`'s children
                 let next = self.next.as_ref().unwrap();
                 let mut next_ptr = next.borrow_mut();
-                match &mut next_ptr.nodes {
+                match &mut next_ptr.children {
                     Some(children) => {
                         children.push(new.clone());
                     }
                     None => {
                         let mut v = Vec::new();
                         v.push(new.clone());
-                        next_ptr.nodes = Some(v);
+                        next_ptr.children = Some(v);
                     }
                 }
             }
@@ -250,7 +253,7 @@ impl FilterBuilder {
         let new = Rc::new(RefCell::new(Node {
             operand: None,
             operator: Some(Operator::OR),
-            nodes: None,
+            children: None,
         }));
 
         match &mut self.root {
@@ -258,14 +261,14 @@ impl FilterBuilder {
                 // If there's a root already, append this op to `next`'s children
                 let next = self.next.as_ref().unwrap();
                 let mut next_ptr = next.borrow_mut();
-                match &mut next_ptr.nodes {
+                match &mut next_ptr.children {
                     Some(children) => {
                         children.push(new.clone());
                     }
                     None => {
                         let mut v = Vec::new();
                         v.push(new.clone());
-                        next_ptr.nodes = Some(v);
+                        next_ptr.children = Some(v);
                     }
                 }
             }
@@ -308,7 +311,7 @@ impl FilterBuilder {
 fn from_u256(u: U256) -> Vec<u8> {
     let mut hex = format!("{:x}", u);
     if hex.len() % 2 != 0 {
-        hex = format!{"0{}", hex};
+        hex = format! {"0{}", hex};
     }
 
     hex::decode(hex).unwrap()
@@ -322,10 +325,10 @@ mod tests {
     fn test_new() {
         let val = U256::from(10000);
         let mut f = FilterBuilder::new();
-        let new = f.value(val);
-        // .and()
-        // .to("0x7a250d5630B4cF539739dF2C5dAcb4c659F24ABC")
-        // .to("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D")
+        let new = f
+            .to("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D")
+            .or()
+            .to("0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45");
         // .or()
         // .from("0x7a250d5630B4cF539739dF2C5dAcb4c659F24BCD")
         // .to("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D")

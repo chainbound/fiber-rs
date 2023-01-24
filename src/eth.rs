@@ -46,7 +46,7 @@ pub struct AccessListItem {
     #[prost(message, repeated, tag="2")]
     pub slots: ::prost::alloc::vec::Vec<super::types::H256>,
 }
-/// TODO: make eip1559 compatible + type
+/// / Typed transaction
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Transaction {
     #[prost(bytes="vec", optional, tag="1")]
@@ -63,8 +63,8 @@ pub struct Transaction {
     pub nonce: u64,
     #[prost(bytes="vec", tag="7")]
     pub value: ::prost::alloc::vec::Vec<u8>,
-    #[prost(bytes="vec", tag="8")]
-    pub from: ::prost::alloc::vec::Vec<u8>,
+    #[prost(bytes="vec", optional, tag="8")]
+    pub from: ::core::option::Option<::prost::alloc::vec::Vec<u8>>,
     #[prost(uint32, tag="9")]
     pub r#type: u32,
     /// = maxFeePerGas = GasFeeCap
@@ -92,61 +92,33 @@ pub struct AccessTuple {
     pub storage_keys: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct StoredTransaction {
-    #[prost(message, optional, tag="1")]
-    pub canonical_data: ::core::option::Option<CanonicalTransactionData>,
-    #[prost(message, optional, tag="2")]
-    pub transaction: ::core::option::Option<Transaction>,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct Header {
+pub struct Block {
     #[prost(uint64, tag="1")]
     pub number: u64,
     #[prost(bytes="vec", tag="2")]
     pub hash: ::prost::alloc::vec::Vec<u8>,
     #[prost(bytes="vec", tag="3")]
     pub parent_hash: ::prost::alloc::vec::Vec<u8>,
-    #[prost(uint64, tag="4")]
-    pub nonce: u64,
+    #[prost(bytes="vec", tag="4")]
+    pub prev_randao: ::prost::alloc::vec::Vec<u8>,
     #[prost(bytes="vec", tag="5")]
-    pub uncle_hash: ::prost::alloc::vec::Vec<u8>,
-    #[prost(bytes="vec", tag="6")]
     pub state_root: ::prost::alloc::vec::Vec<u8>,
-    #[prost(bytes="vec", tag="7")]
+    #[prost(bytes="vec", tag="6")]
     pub receipt_root: ::prost::alloc::vec::Vec<u8>,
-    #[prost(bytes="vec", tag="8")]
-    pub coinbase: ::prost::alloc::vec::Vec<u8>,
-    #[prost(uint64, tag="9")]
-    pub difficulty: u64,
-    #[prost(uint64, optional, tag="10")]
-    pub total_difficulty: ::core::option::Option<u64>,
-    #[prost(bytes="vec", optional, tag="11")]
+    #[prost(bytes="vec", tag="7")]
+    pub fee_recipient: ::prost::alloc::vec::Vec<u8>,
+    #[prost(bytes="vec", optional, tag="8")]
     pub extra_data: ::core::option::Option<::prost::alloc::vec::Vec<u8>>,
-    #[prost(uint64, optional, tag="12")]
-    pub size: ::core::option::Option<u64>,
-    #[prost(uint64, tag="13")]
+    #[prost(uint64, tag="9")]
     pub gas_limit: u64,
-    #[prost(uint64, tag="14")]
+    #[prost(uint64, tag="10")]
     pub gas_used: u64,
-    #[prost(uint64, tag="15")]
+    #[prost(uint64, tag="11")]
     pub timestamp: u64,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct Body {
-    #[prost(message, repeated, tag="1")]
+    #[prost(bytes="vec", tag="12")]
+    pub logs_bloom: ::prost::alloc::vec::Vec<u8>,
+    #[prost(bytes="vec", tag="13")]
+    pub base_fee_per_gas: ::prost::alloc::vec::Vec<u8>,
+    #[prost(message, repeated, tag="14")]
     pub transactions: ::prost::alloc::vec::Vec<Transaction>,
-    #[prost(bytes="vec", repeated, tag="2")]
-    pub ommers: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
-}
-// message LightBlock {
-//    Header header = 1;
-//    repeated types.H256 transaction_hashes = 2;
-// }
-
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct Block {
-    #[prost(message, optional, tag="1")]
-    pub header: ::core::option::Option<Header>,
-    #[prost(message, optional, tag="2")]
-    pub body: ::core::option::Option<Body>,
 }

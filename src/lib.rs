@@ -1,22 +1,28 @@
-use eth::Transaction;
 use ethers::types::{
     transaction::eip2930::{AccessList, AccessListItem},
     OtherFields, Transaction as EthersTx, U256,
 };
+use futures_core::Stream;
 use pin_project::pin_project;
-use tonic::{transport::Channel, Request};
+use tokio::sync::mpsc;
+use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
+use tonic::{transport::Channel, Request, Streaming};
 
 pub mod api;
 pub mod eth;
 pub mod filter;
 pub mod types;
 
-use api::{api_client::ApiClient, BackrunMsg, TxFilterV2};
+use api::{
+    api_client::ApiClient, RawTxMsg, RawTxSequenceMsg, TransactionResponse, TxFilter,
+    TxSequenceMsg, TxSequenceResponse,
+};
+use eth::{Block, Transaction};
 
 #[pin_project]
 pub struct TxStream {
     #[pin]
-    stream: tonic::codec::Streaming<Transaction>,
+    stream: Streaming<Transaction>,
 }
 
 impl TxStream {
@@ -29,6 +35,14 @@ impl TxStream {
 pub struct Client {
     key: String,
     client: ApiClient<Channel>,
+    new_tx_sender: mpsc::UnboundedSender<Transaction>,
+    new_raw_tx_sender: mpsc::UnboundedSender<RawTxMsg>,
+    new_tx_seq_sender: mpsc::UnboundedSender<TxSequenceMsg>,
+    new_raw_tx_seq_sender: mpsc::UnboundedSender<RawTxSequenceMsg>,
+    new_tx_responses: Streaming<TransactionResponse>,
+    new_raw_tx_responses: Streaming<TransactionResponse>,
+    new_tx_seq_responses: Streaming<TxSequenceResponse>,
+    new_raw_tx_seq_responses: Streaming<TxSequenceResponse>,
 }
 
 impl Client {
@@ -37,92 +51,170 @@ impl Client {
         api_key: String,
     ) -> Result<Client, Box<dyn std::error::Error>> {
         let targetstr = "http://".to_owned() + &target;
-        let client = ApiClient::connect(targetstr.to_owned()).await?;
+        let mut client = ApiClient::connect(targetstr.to_owned()).await?;
+
+        // Set up the different streams
+        let (new_tx_sender, rx) = mpsc::unbounded_channel();
+        let rx_stream = UnboundedReceiverStream::new(rx);
+
+        let mut req = Request::new(rx_stream);
+        // Append the api key metadata
+        req.metadata_mut()
+            .append("x-api-key", api_key.parse().unwrap());
+
+        let new_tx_responses = client.send_transaction(req).await?.into_inner();
+
+        let (new_raw_tx_sender, rx) = mpsc::unbounded_channel();
+        let rx_stream = UnboundedReceiverStream::new(rx);
+
+        let mut req = Request::new(rx_stream);
+        // Append the api key metadata
+        req.metadata_mut()
+            .append("x-api-key", api_key.parse().unwrap());
+
+        let new_raw_tx_responses = client.send_raw_transaction(req).await?.into_inner();
+
+        let (new_tx_seq_sender, rx) = mpsc::unbounded_channel();
+        let rx_stream = UnboundedReceiverStream::new(rx);
+
+        let mut req = Request::new(rx_stream);
+        // Append the api key metadata
+        req.metadata_mut()
+            .append("x-api-key", api_key.parse().unwrap());
+
+        let new_tx_seq_responses = client.send_transaction_sequence(req).await?.into_inner();
+
+        let (new_raw_tx_seq_sender, rx) = mpsc::unbounded_channel();
+        let rx_stream = UnboundedReceiverStream::new(rx);
+
+        let mut req = Request::new(rx_stream);
+        // Append the api key metadata
+        req.metadata_mut()
+            .append("x-api-key", api_key.parse().unwrap());
+
+        let new_raw_tx_seq_responses = client
+            .send_raw_transaction_sequence(req)
+            .await?
+            .into_inner();
+
         Ok(Client {
             client,
             key: api_key,
+            new_tx_sender,
+            new_tx_responses,
+            new_raw_tx_sender,
+            new_raw_tx_responses,
+            new_tx_seq_sender,
+            new_tx_seq_responses,
+            new_raw_tx_seq_sender,
+            new_raw_tx_seq_responses,
         })
     }
 
-    /// sends a SIGNED transaction (e.g. v,r,s fields filled in). Returns hash and timestamp.
+    /// Broadcasts a signed transaction to the Fiber Network. Returns hash and the timestamp
+    /// of when the first node received the transaction.
     pub async fn send_transaction(
-        &self,
+        &mut self,
         tx: EthersTx,
     ) -> Result<(String, i64), Box<dyn std::error::Error>> {
-        let mut req = Request::new(tx_to_proto(tx));
+        let _ = self.new_tx_sender.send(tx_to_proto(tx));
 
-        // Append the api key metadata
-        req.metadata_mut()
-            .append("x-api-key", self.key.parse().unwrap());
+        let res = self
+            .new_tx_responses
+            .next()
+            .await
+            .expect("TxResponse should not be empty")
+            .unwrap();
 
-        let res = self.client.clone().send_transaction(req).await?;
-
-        Ok((res.get_ref().hash.to_owned(), res.get_ref().timestamp))
+        Ok((res.hash.to_owned(), res.timestamp))
     }
 
-    /// backruns a transaction (propagates them in a bundle for ensuring the correct sequence).
-    pub async fn backrun_transaction(
-        &self,
-        hash: String,
-        tx: EthersTx,
-    ) -> Result<(String, i64), Box<dyn std::error::Error>> {
-        let proto = tx_to_proto(tx);
-        let mut req = Request::new(BackrunMsg {
-            hash: hash,
-            tx: Some(proto),
-        });
-
-        // Append the api key metadata
-        req.metadata_mut()
-            .append("x-api-key", self.key.parse().unwrap());
-
-        let res = self.client.clone().backrun(req).await?;
-
-        Ok((res.get_ref().hash.to_owned(), res.get_ref().timestamp))
-    }
-
-    /// sends a signed transaction encoded as a byte slice.
+    /// Broadcasts a signed, RLP encoded transaction to the Fiber Network. Returns hash and the timestamp
+    /// of when the first node received the transaction.
     pub async fn send_raw_transaction(
-        &self,
-        raw_tx: &[u8],
+        &mut self,
+        raw_tx: Vec<u8>,
     ) -> Result<(String, i64), Box<dyn std::error::Error>> {
-        let mut req = Request::new(api::RawTxMsg {
-            raw_tx: raw_tx.to_vec(),
-        });
+        let _ = self.new_raw_tx_sender.send(RawTxMsg { raw_tx });
 
-        req.metadata_mut()
-            .append("x-api-key", self.key.parse().unwrap());
-        let res = self.client.clone().send_raw_transaction(req).await?;
+        let res = self
+            .new_raw_tx_responses
+            .next()
+            .await
+            .expect("TxResponse should not be empty")
+            .unwrap();
 
-        Ok((res.get_ref().hash.to_owned(), res.get_ref().timestamp))
+        Ok((res.hash.to_owned(), res.timestamp))
     }
 
-    /// sends a raw transaction signed transaction encoded as a byte slice.
-    pub async fn raw_backrun_transaction(
-        &self,
-        hash: String,
-        raw_tx: &[u8],
-    ) -> Result<(String, i64), Box<dyn std::error::Error>> {
-        let mut req = Request::new(api::RawBackrunMsg {
-            hash: hash,
-            raw_tx: raw_tx.to_vec(),
+    /// Broadcasts a signed transaction sequence to the Fiber Network. Returns the array of hashes and
+    /// the timestamp of when the first node received the sequence.
+    pub async fn send_transaction_sequence(
+        &mut self,
+        tx_sequence: Vec<EthersTx>,
+    ) -> Result<(Vec<String>, i64), Box<dyn std::error::Error>> {
+        let mut proto_txs = Vec::with_capacity(tx_sequence.len());
+
+        for tx in tx_sequence {
+            proto_txs.push(tx_to_proto(tx));
+        }
+
+        let _ = self.new_tx_seq_sender.send(TxSequenceMsg {
+            sequence: proto_txs,
         });
 
-        req.metadata_mut()
-            .append("x-api-key", self.key.parse().unwrap());
-        let res = self.client.clone().raw_backrun(req).await?;
+        let res = self
+            .new_tx_seq_responses
+            .next()
+            .await
+            .expect("TxSequenceResponse should not be empty")
+            .unwrap();
 
-        Ok((res.get_ref().hash.to_owned(), res.get_ref().timestamp))
+        let timestamp = res.sequence_response[0].timestamp;
+        let hashes = res
+            .sequence_response
+            .into_iter()
+            .map(|resp| resp.hash)
+            .collect();
+
+        Ok((hashes, timestamp))
+    }
+
+    /// Broadcasts a signed, RLP encoded transaction sequence to the Fiber Network. Returns the array of hashes and
+    /// the timestamp of when the first node received the sequence.
+    pub async fn send_raw_transaction_sequence(
+        &mut self,
+        raw_tx_sequence: Vec<Vec<u8>>,
+    ) -> Result<(Vec<String>, i64), Box<dyn std::error::Error>> {
+        let _ = self.new_raw_tx_seq_sender.send(RawTxSequenceMsg {
+            raw_txs: raw_tx_sequence,
+        });
+
+        let res = self
+            .new_raw_tx_seq_responses
+            .next()
+            .await
+            .expect("TxSequenceResponse should not be empty")
+            .unwrap();
+
+        let timestamp = res.sequence_response[0].timestamp;
+        let hashes = res
+            .sequence_response
+            .into_iter()
+            .map(|resp| resp.hash)
+            .collect();
+
+        Ok((hashes, timestamp))
     }
 
     /// subscribes to new transactions. This function returns an async stream that needs
     /// to be pinned with futures_util::pin_mut, which can then be used to iterate over.
-    pub async fn subscribe_new_txs(&self, filter: Option<Vec<u8>>) -> TxStream {
+    pub async fn subscribe_new_txs(&self, filter: Option<Vec<u8>>) -> impl Stream<Item = EthersTx> {
         let f = match filter {
-            Some(encoded_filter) => TxFilterV2 {
+            Some(encoded_filter) => TxFilter {
                 encoded: encoded_filter,
             },
-            None => TxFilterV2 { encoded: vec![] },
+            None => TxFilter { encoded: vec![] },
         };
 
         let mut req = Request::new(f);
@@ -130,46 +222,45 @@ impl Client {
         req.metadata_mut()
             .append("x-api-key", self.key.parse().unwrap());
 
-        let stream = self
-            .client
+        self.client
             .clone()
-            .subscribe_new_txs_v2(req)
+            .subscribe_new_txs(req)
             .await
             .unwrap()
-            .into_inner();
-
-        TxStream { stream }
+            .into_inner()
+            .filter_map(|proto| {
+                if let Ok(proto) = proto {
+                    Some(proto_to_tx(proto))
+                } else {
+                    None
+                }
+            })
     }
 
-    // subscribes to new blocks. This function returns an async stream that needs
-    // to be pinned with futures_util::pin_mut, which can then be used to iterate over.
-    // pub async fn subscribe_new_blocks(&mut self) -> impl Stream<Item = eth::Block> {
-    //     // TODO: tx filtering
-    //     let mut req = Request::new(BlockFilter {
-    //         producer: String::new(),
-    //     });
+    pub async fn subscribe_new_blocks(&self) -> impl Stream<Item = Block> {
+        let mut req = Request::new(());
 
-    //     req.metadata_mut()
-    //         .append("x-api-key", self.key.parse().unwrap());
+        req.metadata_mut()
+            .append("x-api-key", self.key.parse().unwrap());
 
-    //     let mut stream = self.client.subscribe_new_blocks(req).await.unwrap().into_inner();
-
-    //     async_stream::stream! {
-    //         while let Some(block) = stream.message().await.unwrap() {
-    //             yield block;
-    //         }
-    //     }
-    // }
+        self.client
+            .clone()
+            .subscribe_new_blocks(req)
+            .await
+            .unwrap()
+            .into_inner()
+            .filter_map(|proto| {
+                if let Ok(block) = proto {
+                    Some(block)
+                } else {
+                    None
+                }
+            })
+    }
 }
 
 fn tx_to_proto(tx: EthersTx) -> Transaction {
-    let mut to: Option<Vec<u8>> = None;
-    match tx.to {
-        Some(rcv) => {
-            to = Some(rcv.as_bytes().to_vec());
-        }
-        _ => {}
-    }
+    let to = tx.to.map(|to| to.as_bytes().to_vec());
 
     let tx_type = match tx.transaction_type {
         Some(tp) => tp.as_u32(),
@@ -207,14 +298,14 @@ fn tx_to_proto(tx: EthersTx) -> Transaction {
     };
 
     Transaction {
-        to: to,
+        to,
         gas: tx.gas.as_u64(),
         gas_price: tx.gas_price.unwrap_or(ethers::types::U256::zero()).as_u64(),
         hash: tx.hash.as_bytes().to_vec(),
         input: tx.input.to_vec(),
         nonce: tx.nonce.as_u64(),
         value: val_bytes.to_vec(),
-        from: tx.from.as_bytes().to_vec(),
+        from: Some(tx.from.as_bytes().to_vec()),
         r#type: tx_type,
         max_fee: tx
             .max_fee_per_gas
@@ -233,10 +324,9 @@ fn tx_to_proto(tx: EthersTx) -> Transaction {
 }
 
 fn proto_to_tx(proto: Transaction) -> EthersTx {
-    let to = match proto.to {
-        Some(vec) => Some(ethers::types::H160::from_slice(vec.as_slice())),
-        None => None,
-    };
+    let to = proto
+        .to
+        .map(|to| ethers::types::H160::from_slice(to.as_slice()));
 
     let tx_type: Option<ethers::types::U64> = match proto.r#type {
         1 => Some(1.into()),
@@ -265,7 +355,7 @@ fn proto_to_tx(proto: Transaction) -> EthersTx {
     };
 
     let mut acl: Option<AccessList> = None;
-    if proto.access_list.len() > 0 {
+    if !proto.access_list.is_empty() {
         let mut new_acl: Vec<AccessListItem> = Vec::new();
 
         for tup in proto.access_list {
@@ -290,128 +380,20 @@ fn proto_to_tx(proto: Transaction) -> EthersTx {
         block_hash: None,
         block_number: None,
         transaction_index: None,
-        from: ethers::types::H160::from_slice(proto.from.as_slice()),
-        to: to,
+        from: ethers::types::H160::from_slice(proto.from.unwrap_or_default().as_slice()),
+        to,
         value: val,
-        gas_price: gas_price,
+        gas_price,
         gas: proto.gas.into(),
         input: proto.input.into(),
         v: proto.v.into(),
-        r: r,
-        s: s,
+        r,
+        s,
         transaction_type: tx_type,
         access_list: acl,
         max_priority_fee_per_gas: priority_fee,
         max_fee_per_gas: max_fee,
         chain_id: Some(proto.chain_id.into()),
         other: OtherFields::default(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::filter::FilterBuilder;
-
-    use super::*;
-    use ethers::{
-        signers::{LocalWallet, Signer},
-        types::{transaction::eip2718::TypedTransaction, Address, TransactionRequest},
-    };
-
-    #[tokio::test]
-    async fn connect() {
-        // let target = "fiber-node.fly.dev:8080";
-        let target = String::from("localhost:8080");
-        let client = Client::connect(
-            target,
-            String::from("fiber/v0.0.2-alpha/28820807-4315-491c-bfbe-b38d9513b687"),
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            client.key,
-            "fiber/v0.0.2-alpha/28820807-4315-491c-bfbe-b38d9513b687"
-        );
-    }
-
-    #[test]
-    fn test_metadata() {
-        let mut req = Request::new("str");
-
-        req.metadata_mut()
-            .append("x-api-key", "api_key".parse().unwrap());
-
-        assert_eq!(req.metadata().get("x-api-key").unwrap(), &"api_key");
-    }
-
-    #[tokio::test]
-    async fn test_send_transaction() {
-        let target = String::from("localhost:8080");
-        let client = Client::connect(
-            target,
-            String::from("fiber/v0.0.2-alpha/28820807-4315-491c-bfbe-b38d9513b687"),
-        )
-        .await
-        .unwrap();
-
-        let tx: TypedTransaction = TransactionRequest::new()
-            .nonce(3)
-            .gas_price(1)
-            .gas(25000)
-            .to("b94f5374fce5edbc8e2a8697c15331677e6ebf0b"
-                .parse::<Address>()
-                .unwrap())
-            .value(10)
-            .data(vec![0x55, 0x44])
-            .chain_id(1)
-            .into();
-
-        let wallet: LocalWallet =
-            "15bb7dd02dd8805338310f045ae9975aedb7c90285618bd2ecdc91db52170a90"
-                .parse()
-                .unwrap();
-
-        let sig = wallet.sign_transaction(&tx.clone()).await.unwrap();
-
-        let signed = tx.rlp_signed(&sig);
-
-        let res = client.send_raw_transaction(&signed).await.unwrap();
-
-        println!("{:?}", res);
-    }
-
-    #[tokio::test]
-    async fn test_subscribe() {
-        let target = String::from("localhost:8080");
-        let client = Client::connect(
-            target,
-            String::from("fiber/v0.0.2-alpha/28820807-4315-491c-bfbe-b38d9513b687"),
-        )
-        .await
-        .unwrap();
-
-        println!("connected to client");
-        let f = FilterBuilder::new()
-            // .and()
-            // .method_id("0xa9059cbb")
-            // .or()
-            // .to("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
-            .to("0xdAC17F958D2ee523a2206206994597C13D831ec7")
-            .encode().unwrap();
-        // .value(U256::from_dec_str("10000000000000000000").unwrap()).build();
-        // .to("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D").build();
-        let mut sub = client.subscribe_new_txs(Some(f)).await;
-
-        println!("listening to txs");
-
-        while let Some(value) = sub.next().await {
-            println!("{:#?}", value.hash);
-            println!("{:#?}", value.to);
-            if let Some(acl) = value.access_list {
-                if acl.0.len() > 0 {
-                    println!("{:#?}", value.hash);
-                }
-            }
-        }
     }
 }
