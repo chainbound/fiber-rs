@@ -84,7 +84,25 @@ async fn main() {
 ```
 
 #### Blocks
-WIP
+Returns a stream of newly seen blocks.
+**Example:**
+```rs
+use fiber::Client;
+
+#[tokio::main]
+async fn main() {
+    // Client needs to be mutable
+    let mut client = Client::connect("ENDPOINT_URL".to_string(), "API_KEY".to_string()).await.unwrap();
+
+    // No filter in this example
+    let mut sub = client.subscribe_new_blocks().await;
+
+    // Use the stream as an async iterator
+    while let Some(tx) = sub.next().await {
+        handle_transaction(tx);
+    }
+}
+```
 
 ### Sending Transactions
 #### `send_raw_transaction`
@@ -120,7 +138,9 @@ asyn fn main() {
     println!("{:?}", res);
 }
 ```
-#### `raw_backrun_transaction`
+#### `send_raw_transaction_sequence`
+Sends a sequence of RLP encoded transactions, for things like backrunning and other strategies
+where the explicitly stated order is important.
 ```rs
 use ethers::{
     signers::{LocalWallet, Signer},
@@ -148,9 +168,10 @@ asyn fn main() {
 
     let signed = tx.rlp_signed(&sig);
 
-    let target_hash = "0x..."
+    // The target transaction should be an RLP encoded transaction as well
+    let target_tx: Vec<u8> = vec![...]
 
-    let res = client.raw_backrun_transaction(target_hash, &signed).await.unwrap();
+    let res = client.send_raw_transaction_sequence(vec![target_tx, signed]).await.unwrap();
 
     println!("{:?}", res);
 }
