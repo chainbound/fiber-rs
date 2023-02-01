@@ -98,8 +98,8 @@ async fn main() {
     let mut sub = client.subscribe_new_blocks().await;
 
     // Use the stream as an async iterator
-    while let Some(tx) = sub.next().await {
-        handle_transaction(tx);
+    while let Some(block) = sub.next().await {
+        handle_block(tx);
     }
 }
 ```
