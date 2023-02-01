@@ -207,8 +207,7 @@ impl Client {
         Ok((hashes, timestamp))
     }
 
-    /// subscribes to new transactions. This function returns an async stream that needs
-    /// to be pinned with futures_util::pin_mut, which can then be used to iterate over.
+    /// Subscribes to new transactions, returning a stream of ethers transactions.
     pub async fn subscribe_new_txs(&self, filter: Option<Vec<u8>>) -> impl Stream<Item = EthersTx> {
         let f = match filter {
             Some(encoded_filter) => TxFilter {
@@ -237,6 +236,8 @@ impl Client {
             })
     }
 
+    /// Subscribes to new blocks, returns a stream of proto blocks. TODO: convert
+    /// these to ethers blocks.
     pub async fn subscribe_new_blocks(&self) -> impl Stream<Item = Block> {
         let mut req = Request::new(());
 
