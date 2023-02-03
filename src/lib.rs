@@ -2,7 +2,6 @@ use ethers::types::{
     transaction::eip2930::{AccessList, AccessListItem},
     OtherFields, Transaction as EthersTx, U256,
 };
-use futures_core::Stream;
 use pin_project::pin_project;
 use tokio::sync::mpsc;
 use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
@@ -208,7 +207,10 @@ impl Client {
     }
 
     /// Subscribes to new transactions, returning a stream of ethers transactions.
-    pub async fn subscribe_new_txs(&self, filter: Option<Vec<u8>>) -> impl Stream<Item = EthersTx> {
+    pub async fn subscribe_new_txs(
+        &self,
+        filter: Option<Vec<u8>>,
+    ) -> UnboundedReceiverStream<EthersTx> {
         let f = match filter {
             Some(encoded_filter) => TxFilter {
                 encoded: encoded_filter,
@@ -221,42 +223,50 @@ impl Client {
         req.metadata_mut()
             .append("x-api-key", self.key.parse().unwrap());
 
-        self.client
+        let mut inner = self
+            .client
             .clone()
             .subscribe_new_txs(req)
             .await
             .unwrap()
-            .into_inner()
-            .filter_map(|proto| {
-                if let Ok(proto) = proto {
-                    Some(proto_to_tx(proto))
-                } else {
-                    None
-                }
-            })
+            .into_inner();
+
+        let (tx, rx) = mpsc::unbounded_channel();
+
+        tokio::spawn(async move {
+            while let Some(Ok(transaction)) = inner.next().await {
+                let _ = tx.send(proto_to_tx(transaction));
+            }
+        });
+
+        UnboundedReceiverStream::new(rx)
     }
 
     /// Subscribes to new blocks, returns a stream of proto blocks. TODO: convert
     /// these to ethers blocks.
-    pub async fn subscribe_new_blocks(&self) -> impl Stream<Item = Block> {
+    pub async fn subscribe_new_blocks(&self) -> UnboundedReceiverStream<Block> {
         let mut req = Request::new(());
 
         req.metadata_mut()
             .append("x-api-key", self.key.parse().unwrap());
 
-        self.client
+        let mut inner = self
+            .client
             .clone()
             .subscribe_new_blocks(req)
             .await
             .unwrap()
-            .into_inner()
-            .filter_map(|proto| {
-                if let Ok(block) = proto {
-                    Some(block)
-                } else {
-                    None
-                }
-            })
+            .into_inner();
+
+        let (tx, rx) = mpsc::unbounded_channel();
+
+        tokio::spawn(async move {
+            while let Some(Ok(block)) = inner.next().await {
+                let _ = tx.send(block);
+            }
+        });
+
+        UnboundedReceiverStream::new(rx)
     }
 }
 
