@@ -3,7 +3,7 @@ use ethers::types::{
     OtherFields, Transaction as EthersTx, U256,
 };
 use pin_project::pin_project;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
 use tonic::{transport::Channel, Request, Streaming};
 
@@ -31,9 +31,28 @@ impl TxStream {
     }
 }
 
-pub struct Client {
-    key: String,
-    client: ApiClient<Channel>,
+#[allow(clippy::large_enum_variant)]
+pub enum SendType {
+    Transaction {
+        tx: Transaction,
+        response: oneshot::Sender<TransactionResponse>,
+    },
+    RawTransaction {
+        msg: RawTxMsg,
+        response: oneshot::Sender<TransactionResponse>,
+    },
+    TransactionSequence {
+        msg: TxSequenceMsg,
+        response: oneshot::Sender<TxSequenceResponse>,
+    },
+    RawTransactionSequence {
+        msg: RawTxSequenceMsg,
+        response: oneshot::Sender<TxSequenceResponse>,
+    },
+}
+
+struct ClientInner {
+    cmd_rx: mpsc::UnboundedReceiver<SendType>,
     new_tx_sender: mpsc::UnboundedSender<Transaction>,
     new_raw_tx_sender: mpsc::UnboundedSender<RawTxMsg>,
     new_tx_seq_sender: mpsc::UnboundedSender<TxSequenceMsg>,
@@ -42,6 +61,69 @@ pub struct Client {
     new_raw_tx_responses: Streaming<TransactionResponse>,
     new_tx_seq_responses: Streaming<TxSequenceResponse>,
     new_raw_tx_seq_responses: Streaming<TxSequenceResponse>,
+}
+
+impl ClientInner {
+    async fn run_loop(mut self) {
+        while let Some(cmd) = self.cmd_rx.recv().await {
+            match cmd {
+                SendType::Transaction { tx, response } => {
+                    let _ = self.new_tx_sender.send(tx);
+
+                    let res = self
+                        .new_tx_responses
+                        .next()
+                        .await
+                        .expect("TxResponse should not be empty")
+                        .unwrap();
+
+                    let _ = response.send(res);
+                }
+                SendType::RawTransaction { msg, response } => {
+                    let _ = self.new_raw_tx_sender.send(msg);
+
+                    let res = self
+                        .new_raw_tx_responses
+                        .next()
+                        .await
+                        .expect("TxResponse should not be empty")
+                        .unwrap();
+
+                    let _ = response.send(res);
+                }
+                SendType::TransactionSequence { msg, response } => {
+                    let _ = self.new_tx_seq_sender.send(msg);
+
+                    let res = self
+                        .new_tx_seq_responses
+                        .next()
+                        .await
+                        .expect("TxSequenceReponse should not be empty")
+                        .unwrap();
+
+                    let _ = response.send(res);
+                }
+                SendType::RawTransactionSequence { msg, response } => {
+                    let _ = self.new_raw_tx_seq_sender.send(msg);
+
+                    let res = self
+                        .new_raw_tx_seq_responses
+                        .next()
+                        .await
+                        .expect("TxSequenceReponse should not be empty")
+                        .unwrap();
+
+                    let _ = response.send(res);
+                }
+            }
+        }
+    }
+}
+
+pub struct Client {
+    key: String,
+    client: ApiClient<Channel>,
+    cmd_tx: mpsc::UnboundedSender<SendType>,
 }
 
 impl Client {
@@ -96,9 +178,17 @@ impl Client {
             .await?
             .into_inner();
 
-        Ok(Client {
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+
+        let client = Client {
             client,
             key: api_key,
+            cmd_tx,
+        };
+
+        // Create the inner client which has access to all the gRPC channels
+        let inner = ClientInner {
+            cmd_rx,
             new_tx_sender,
             new_tx_responses,
             new_raw_tx_sender,
@@ -107,23 +197,28 @@ impl Client {
             new_tx_seq_responses,
             new_raw_tx_seq_sender,
             new_raw_tx_seq_responses,
-        })
+        };
+
+        // Spawn the loop
+        tokio::task::spawn(inner.run_loop());
+
+        Ok(client)
     }
 
     /// Broadcasts a signed transaction to the Fiber Network. Returns hash and the timestamp
     /// of when the first node received the transaction.
     pub async fn send_transaction(
-        &mut self,
+        &self,
         tx: EthersTx,
     ) -> Result<(String, i64), Box<dyn std::error::Error>> {
-        let _ = self.new_tx_sender.send(tx_to_proto(tx));
+        let (res, rx) = oneshot::channel();
 
-        let res = self
-            .new_tx_responses
-            .next()
-            .await
-            .expect("TxResponse should not be empty")
-            .unwrap();
+        let _ = self.cmd_tx.send(SendType::Transaction {
+            tx: tx_to_proto(tx),
+            response: res,
+        });
+
+        let res = rx.await?;
 
         Ok((res.hash.to_owned(), res.timestamp))
     }
@@ -131,17 +226,17 @@ impl Client {
     /// Broadcasts a signed, RLP encoded transaction to the Fiber Network. Returns hash and the timestamp
     /// of when the first node received the transaction.
     pub async fn send_raw_transaction(
-        &mut self,
+        &self,
         raw_tx: Vec<u8>,
     ) -> Result<(String, i64), Box<dyn std::error::Error>> {
-        let _ = self.new_raw_tx_sender.send(RawTxMsg { raw_tx });
+        let (res, rx) = oneshot::channel();
 
-        let res = self
-            .new_raw_tx_responses
-            .next()
-            .await
-            .expect("TxResponse should not be empty")
-            .unwrap();
+        let _ = self.cmd_tx.send(SendType::RawTransaction {
+            msg: RawTxMsg { raw_tx },
+            response: res,
+        });
+
+        let res = rx.await?;
 
         Ok((res.hash.to_owned(), res.timestamp))
     }
@@ -149,7 +244,7 @@ impl Client {
     /// Broadcasts a signed transaction sequence to the Fiber Network. Returns the array of hashes and
     /// the timestamp of when the first node received the sequence.
     pub async fn send_transaction_sequence(
-        &mut self,
+        &self,
         tx_sequence: Vec<EthersTx>,
     ) -> Result<(Vec<String>, i64), Box<dyn std::error::Error>> {
         let mut proto_txs = Vec::with_capacity(tx_sequence.len());
@@ -158,16 +253,16 @@ impl Client {
             proto_txs.push(tx_to_proto(tx));
         }
 
-        let _ = self.new_tx_seq_sender.send(TxSequenceMsg {
-            sequence: proto_txs,
+        let (res, rx) = oneshot::channel();
+
+        let _ = self.cmd_tx.send(SendType::TransactionSequence {
+            msg: TxSequenceMsg {
+                sequence: proto_txs,
+            },
+            response: res,
         });
 
-        let res = self
-            .new_tx_seq_responses
-            .next()
-            .await
-            .expect("TxSequenceResponse should not be empty")
-            .unwrap();
+        let res = rx.await?;
 
         let timestamp = res.sequence_response[0].timestamp;
         let hashes = res
@@ -182,19 +277,19 @@ impl Client {
     /// Broadcasts a signed, RLP encoded transaction sequence to the Fiber Network. Returns the array of hashes and
     /// the timestamp of when the first node received the sequence.
     pub async fn send_raw_transaction_sequence(
-        &mut self,
+        &self,
         raw_tx_sequence: Vec<Vec<u8>>,
     ) -> Result<(Vec<String>, i64), Box<dyn std::error::Error>> {
-        let _ = self.new_raw_tx_seq_sender.send(RawTxSequenceMsg {
-            raw_txs: raw_tx_sequence,
+        let (res, rx) = oneshot::channel();
+
+        let _ = self.cmd_tx.send(SendType::RawTransactionSequence {
+            msg: RawTxSequenceMsg {
+                raw_txs: raw_tx_sequence,
+            },
+            response: res,
         });
 
-        let res = self
-            .new_raw_tx_seq_responses
-            .next()
-            .await
-            .expect("TxSequenceResponse should not be empty")
-            .unwrap();
+        let res = rx.await?;
 
         let timestamp = res.sequence_response[0].timestamp;
         let hashes = res
