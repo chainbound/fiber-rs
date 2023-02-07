@@ -47,7 +47,7 @@ async fn main() {
 You can apply filters to the transaction stream using `fiber::filter::Filter`. The builder pattern is used
 for constructing a filter, with a couple of examples below.
 ```rs
-use fiber::{Client, filter::Filter};
+use fiber::{Client, filter::FilterBuilder};
 
 #[tokio::main]
 async fn main() {
@@ -56,17 +56,17 @@ async fn main() {
 
     // Construct filter
     // example 1: simple receiver filter
-    let f = Filter::new()
+    let f = FilterBuilder::new()
                 .to("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D");
     
     // example 2: all transactions with either of these addresses as the receiver
-    let f = Filter::new()
+    let f = FilterBuilder::new()
                 .or() // creates a new 'OR' level
                   .to("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
                   .to("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D");
 
     // example 3: all ERC20 transfers on the 2 tokens below
-    let f = Filter::new()
+    let f = FilterBuilder::new()
                 .and()
                   .method_id("0xa9059cbb")
                   .or()
