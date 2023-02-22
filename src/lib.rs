@@ -70,50 +70,30 @@ impl ClientInner {
                 SendType::Transaction { tx, response } => {
                     self.new_tx_sender.send(tx).unwrap();
 
-                    let res = self
-                        .new_tx_responses
-                        .message()
-                        .await
-                        .expect("TxResponse should not be empty")
-                        .unwrap();
-
-                    let _ = response.send(res);
+                    if let Some(res) = self.new_tx_responses.next().await {
+                        let _ = response.send(res.unwrap());
+                    }
                 }
                 SendType::RawTransaction { msg, response } => {
                     self.new_raw_tx_sender.send(msg).unwrap();
 
-                    let res = self
-                        .new_raw_tx_responses
-                        .message()
-                        .await
-                        .expect("TxResponse should not be empty")
-                        .unwrap();
-
-                    let _ = response.send(res);
+                    if let Some(res) = self.new_raw_tx_responses.next().await {
+                        let _ = response.send(res.unwrap());
+                    }
                 }
                 SendType::TransactionSequence { msg, response } => {
                     self.new_tx_seq_sender.send(msg).unwrap();
 
-                    let res = self
-                        .new_tx_seq_responses
-                        .message()
-                        .await
-                        .expect("TxSequenceReponse should not be empty")
-                        .unwrap();
-
-                    let _ = response.send(res);
+                    if let Some(res) = self.new_tx_seq_responses.next().await {
+                        let _ = response.send(res.unwrap());
+                    }
                 }
                 SendType::RawTransactionSequence { msg, response } => {
                     self.new_raw_tx_seq_sender.send(msg).unwrap();
 
-                    let res = self
-                        .new_raw_tx_seq_responses
-                        .message()
-                        .await
-                        .expect("TxSequenceReponse should not be empty")
-                        .unwrap();
-
-                    let _ = response.send(res);
+                    if let Some(res) = self.new_raw_tx_seq_responses.next().await {
+                        let _ = response.send(res.unwrap());
+                    }
                 }
             }
         }
