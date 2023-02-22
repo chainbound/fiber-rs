@@ -68,7 +68,7 @@ impl ClientInner {
         while let Some(cmd) = self.cmd_rx.recv().await {
             match cmd {
                 SendType::Transaction { tx, response } => {
-                    let _ = self.new_tx_sender.send(tx);
+                    self.new_tx_sender.send(tx).unwrap();
 
                     let res = self
                         .new_tx_responses
@@ -80,7 +80,7 @@ impl ClientInner {
                     let _ = response.send(res);
                 }
                 SendType::RawTransaction { msg, response } => {
-                    let _ = self.new_raw_tx_sender.send(msg);
+                    self.new_raw_tx_sender.send(msg).unwrap();
 
                     let res = self
                         .new_raw_tx_responses
@@ -92,7 +92,7 @@ impl ClientInner {
                     let _ = response.send(res);
                 }
                 SendType::TransactionSequence { msg, response } => {
-                    let _ = self.new_tx_seq_sender.send(msg);
+                    self.new_tx_seq_sender.send(msg).unwrap();
 
                     let res = self
                         .new_tx_seq_responses
@@ -104,7 +104,7 @@ impl ClientInner {
                     let _ = response.send(res);
                 }
                 SendType::RawTransactionSequence { msg, response } => {
-                    let _ = self.new_raw_tx_seq_sender.send(msg);
+                    self.new_raw_tx_seq_sender.send(msg).unwrap();
 
                     let res = self
                         .new_raw_tx_seq_responses
