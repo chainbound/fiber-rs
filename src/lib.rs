@@ -373,13 +373,13 @@ fn tx_to_proto(tx: EthersTx) -> Transaction {
         None => 0,
     };
 
-    let mut val_bytes = [0];
+    let mut val_bytes = [0; 32];
     tx.value.to_big_endian(&mut val_bytes);
 
-    let mut r_bytes = [0];
+    let mut r_bytes = [0; 32];
     tx.r.to_big_endian(&mut r_bytes);
 
-    let mut s_bytes = [0];
+    let mut s_bytes = [0; 32];
     tx.s.to_big_endian(&mut s_bytes);
 
     let acl = match tx.access_list {
