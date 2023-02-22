@@ -111,7 +111,12 @@ impl Client {
         target: String,
         api_key: String,
     ) -> Result<Client, Box<dyn std::error::Error>> {
-        let targetstr = "http://".to_owned() + &target;
+        let targetstr = if !target.starts_with("http://") {
+            "http://".to_owned() + &target
+        } else {
+            target
+        };
+
         let mut client = ApiClient::connect(targetstr.to_owned()).await?;
 
         // Set up the different streams
