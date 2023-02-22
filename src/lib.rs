@@ -369,7 +369,7 @@ fn tx_to_proto(tx: EthersTx) -> Transaction {
     let to = tx.to.map(|to| to.as_bytes().to_vec());
 
     let tx_type = match tx.transaction_type {
-        Some(tp) => tp.as_u32(),
+        Some(tp) => tp.as_u64(),
         None => 0,
     };
 
@@ -412,7 +412,7 @@ fn tx_to_proto(tx: EthersTx) -> Transaction {
         nonce: tx.nonce.as_u64(),
         value: val_bytes.to_vec(),
         from: Some(tx.from.as_bytes().to_vec()),
-        r#type: tx_type,
+        r#type: tx_type as u32,
         max_fee: tx
             .max_fee_per_gas
             .unwrap_or(ethers::types::U256::zero())
