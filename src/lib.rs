@@ -72,7 +72,7 @@ impl ClientInner {
 
                     let res = self
                         .new_tx_responses
-                        .next()
+                        .message()
                         .await
                         .expect("TxResponse should not be empty")
                         .unwrap();
@@ -84,7 +84,7 @@ impl ClientInner {
 
                     let res = self
                         .new_raw_tx_responses
-                        .next()
+                        .message()
                         .await
                         .expect("TxResponse should not be empty")
                         .unwrap();
@@ -96,7 +96,7 @@ impl ClientInner {
 
                     let res = self
                         .new_tx_seq_responses
-                        .next()
+                        .message()
                         .await
                         .expect("TxSequenceReponse should not be empty")
                         .unwrap();
@@ -108,7 +108,7 @@ impl ClientInner {
 
                     let res = self
                         .new_raw_tx_seq_responses
-                        .next()
+                        .message()
                         .await
                         .expect("TxSequenceReponse should not be empty")
                         .unwrap();
