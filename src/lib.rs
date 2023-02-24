@@ -460,6 +460,21 @@ fn proto_to_tx(proto: Transaction) -> EthersTx {
         acl = Some(ethers::types::transaction::eip2930::AccessList(new_acl));
     }
 
+    let v = if tx_type.is_some() {
+        if proto.v > 1 {
+            proto.v - 37
+        } else {
+            proto.v
+        }
+    } else {
+        // Legacy
+        if proto.v > 30 {
+            proto.v - 10
+        } else {
+            proto.v
+        }
+    };
+
     EthersTx {
         hash: ethers::types::H256::from_slice(proto.hash.as_slice()),
         nonce: proto.nonce.into(),
@@ -472,7 +487,7 @@ fn proto_to_tx(proto: Transaction) -> EthersTx {
         gas_price,
         gas: proto.gas.into(),
         input: proto.input.into(),
-        v: proto.v.into(),
+        v: v.into(),
         r,
         s,
         transaction_type: tx_type,
@@ -481,5 +496,24 @@ fn proto_to_tx(proto: Transaction) -> EthersTx {
         max_fee_per_gas: max_fee,
         chain_id: Some(proto.chain_id.into()),
         other: OtherFields::default(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ethers::utils::rlp::{Decodable, Rlp};
+
+    use super::*;
+
+    #[test]
+    fn should_convert_tx_to_proto() {
+        let signed_rlp = hex::decode("02f864010314018261a894b94f5374fce5edbc8e2a8697c15331677e6ebf0b0a825544c001a0e4663a0f2ea882cf5b38ee63b375dd116d75153d7bbcff972aee6fe0ecc920fca050917b98425bd43a3bfdc4ecd2de4424d6b2b6b5fd55d0b34fc805db58d0224b").unwrap();
+
+        let tx_rlp = Rlp::new(signed_rlp.as_slice());
+        let tx = EthersTx::decode(&tx_rlp).unwrap();
+
+        let proto = tx_to_proto(tx);
+
+        println!("proto: {:?}", proto);
     }
 }
