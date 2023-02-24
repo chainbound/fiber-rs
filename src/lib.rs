@@ -467,12 +467,7 @@ fn proto_to_tx(proto: Transaction) -> EthersTx {
             proto.v
         }
     } else {
-        // Legacy
-        if proto.v > 30 {
-            proto.v - 10
-        } else {
-            proto.v
-        }
+        proto.v
     };
 
     EthersTx {
