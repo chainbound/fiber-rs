@@ -1,6 +1,6 @@
 [package]
 name = "fiber"
-version = "0.3.1"
+version = "0.3.3"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -9,7 +9,7 @@ edition = "2021"
 prost = "0.11.0"
 tonic = "0.8"
 tokio = { version = "1.21.1", features = ["macros", "rt-multi-thread"] }
-ethers = "0.17.0"
+ethers = "2"
 tokio-stream = "0.1.9"
 async-stream = "0.3.3"
 futures-core = "0.3.24"
