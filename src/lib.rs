@@ -475,6 +475,14 @@ fn proto_to_tx(proto: Transaction) -> EthersTx {
         proto.v
     };
 
+    let mut chain_id = Some(proto.chain_id.into());
+
+    // If transaction is legacy (no type) and its v value is 27 or 28, we set chain ID to None.
+    // This signifies a pre EIP-155 transaction.
+    if tx_type.is_none() && proto.v < 37 {
+        chain_id = None;
+    }
+
     EthersTx {
         hash: ethers::types::H256::from_slice(proto.hash.as_slice()),
         nonce: proto.nonce.into(),
@@ -494,7 +502,7 @@ fn proto_to_tx(proto: Transaction) -> EthersTx {
         access_list: acl,
         max_priority_fee_per_gas: priority_fee,
         max_fee_per_gas: max_fee,
-        chain_id: Some(proto.chain_id.into()),
+        chain_id,
         other: OtherFields::default(),
     }
 }
