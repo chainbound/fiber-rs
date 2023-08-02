@@ -83,8 +83,11 @@ async fn main() {
 }
 ```
 
-#### Blocks
-Returns a stream of newly seen blocks.
+#### Execution Payloads (new block headers + transactions)
+Returns a stream of newly seen execution payloads. This is useful for getting the state updates of a
+newly confirmed block. An `ExecutionPayload` contains both the block header and the transactions 
+that were executed in that block.
+
 **Example:**
 ```rs
 use fiber::Client;
@@ -95,7 +98,7 @@ async fn main() {
     let mut client = Client::connect("ENDPOINT_URL".to_string(), "API_KEY".to_string()).await.unwrap();
 
     // No filter in this example
-    let mut sub = client.subscribe_new_blocks().await;
+    let mut sub = client.subscribe_new_execution_payloads().await;
 
     // Use the stream as an async iterator
     while let Some(block) = sub.next().await {
@@ -103,6 +106,52 @@ async fn main() {
     }
 }
 ```
+
+#### Execution Headers (new block headers only)
+Returns a stream of newly seen execution headers. This is useful for updating the state root and other
+block metadata without having to fetch all the transactions, which offers a latency improvement.
+
+**Example:**
+```rs
+use fiber::Client;
+
+#[tokio::main]
+async fn main() {
+    // Client needs to be mutable
+    let mut client = Client::connect("ENDPOINT_URL".to_string(), "API_KEY".to_string()).await.unwrap();
+
+    // No filter in this example
+    let mut sub = client.subscribe_new_execution_headers().await;
+
+    // Use the stream as an async iterator
+    while let Some(header) = sub.next().await {
+        handle_block_header(header);
+    }
+}
+```
+
+#### Beacon Blocks
+Returns a stream of consensus-layer [`BeaconBlock`](https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#beaconblock) objects. NOTE: the `ExecutionPayload` is not included in this stream, please use the `subscribe_new_execution_payloads` stream if you need it. 
+
+**Example:**
+```rs
+use fiber::Client;
+
+#[tokio::main]
+async fn main() {
+    // Client needs to be mutable
+    let mut client = Client::connect("ENDPOINT_URL".to_string(), "API_KEY".to_string()).await.unwrap();
+
+    // No filter in this example
+    let mut sub = client.subscribe_new_beacon_blocks().await;
+
+    // Use the stream as an async iterator
+    while let Some(block) = sub.next().await {
+        handle_beacon_block(block);
+    }
+}
+```
+
 
 ### Sending Transactions
 #### `send_raw_transaction`
