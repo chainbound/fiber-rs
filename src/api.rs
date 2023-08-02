@@ -1,53 +1,46 @@
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TxSequenceMsg {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub sequence: ::prost::alloc::vec::Vec<super::eth::Transaction>,
 }
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RawTxSequenceMsg {
-    #[prost(bytes="vec", repeated, tag="1")]
+    #[prost(bytes = "vec", repeated, tag = "1")]
     pub raw_txs: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
 }
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TxSequenceResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub sequence_response: ::prost::alloc::vec::Vec<TransactionResponse>,
 }
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TxFilter {
-    #[prost(bytes="vec", tag="1")]
+    #[prost(bytes = "vec", tag = "1")]
     pub encoded: ::prost::alloc::vec::Vec<u8>,
 }
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct BlockFilter {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub producer: ::prost::alloc::string::String,
 }
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RawTxMsg {
-    #[prost(bytes="vec", tag="1")]
+    #[prost(bytes = "vec", tag = "1")]
     pub raw_tx: ::prost::alloc::vec::Vec<u8>,
 }
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TransactionResponse {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub hash: ::prost::alloc::string::String,
-    #[prost(int64, tag="2")]
+    #[prost(int64, tag = "2")]
     pub timestamp: i64,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct BackrunMsg {
-    #[prost(string, tag="1")]
-    pub hash: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="2")]
-    pub tx: ::core::option::Option<super::eth::Transaction>,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct RawBackrunMsg {
-    #[prost(string, tag="1")]
-    pub hash: ::prost::alloc::string::String,
-    #[prost(bytes="vec", tag="2")]
-    pub raw_tx: ::prost::alloc::vec::Vec<u8>,
 }
 /// Generated client implementations.
 pub mod api_client {
@@ -231,12 +224,14 @@ pub mod api_client {
             );
             self.inner.streaming(request.into_streaming_request(), path, codec).await
         }
-        /// Opens a new block stream.
-        pub async fn subscribe_new_blocks(
+        /// Opens a stream of new execution payloads.
+        pub async fn subscribe_execution_payloads(
             &mut self,
             request: impl tonic::IntoRequest<()>,
         ) -> Result<
-            tonic::Response<tonic::codec::Streaming<super::super::eth::Block>>,
+            tonic::Response<
+                tonic::codec::Streaming<super::super::eth::ExecutionPayload>,
+            >,
             tonic::Status,
         > {
             self.inner
@@ -250,7 +245,58 @@ pub mod api_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/api.API/SubscribeNewBlocks",
+                "/api.API/SubscribeExecutionPayloads",
+            );
+            self.inner.server_streaming(request.into_request(), path, codec).await
+        }
+        /// Opens a stream of new execution payload headers.
+        pub async fn subscribe_execution_headers(
+            &mut self,
+            request: impl tonic::IntoRequest<()>,
+        ) -> Result<
+            tonic::Response<
+                tonic::codec::Streaming<super::super::eth::ExecutionPayloadHeader>,
+            >,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/api.API/SubscribeExecutionHeaders",
+            );
+            self.inner.server_streaming(request.into_request(), path, codec).await
+        }
+        /// Opens a stream of new beacon blocks. The beacon blocks are "compacted", meaning that the
+        /// execution payload is not included.
+        pub async fn subscribe_beacon_blocks(
+            &mut self,
+            request: impl tonic::IntoRequest<()>,
+        ) -> Result<
+            tonic::Response<
+                tonic::codec::Streaming<super::super::eth::CompactBeaconBlock>,
+            >,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/api.API/SubscribeBeaconBlocks",
             );
             self.inner.server_streaming(request.into_request(), path, codec).await
         }
