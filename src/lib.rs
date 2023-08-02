@@ -16,7 +16,7 @@ use api::{
     api_client::ApiClient, RawTxMsg, RawTxSequenceMsg, TransactionResponse, TxFilter,
     TxSequenceMsg, TxSequenceResponse,
 };
-use eth::{Block, Transaction};
+use eth::{CompactBeaconBlock, ExecutionPayload, ExecutionPayloadHeader, Transaction};
 
 #[pin_project]
 pub struct TxStream {
@@ -322,9 +322,9 @@ impl Client {
         UnboundedReceiverStream::new(rx)
     }
 
-    /// Subscribes to new blocks, returns a stream of proto blocks. TODO: convert
-    /// these to ethers blocks.
-    pub async fn subscribe_new_blocks(&self) -> UnboundedReceiverStream<Block> {
+    pub async fn subscribe_new_execution_headers(
+        &self,
+    ) -> UnboundedReceiverStream<ExecutionPayloadHeader> {
         let mut req = Request::new(());
 
         req.metadata_mut()
@@ -333,7 +333,60 @@ impl Client {
         let mut inner = self
             .client
             .clone()
-            .subscribe_new_blocks(req)
+            .subscribe_execution_headers(req)
+            .await
+            .unwrap()
+            .into_inner();
+
+        let (tx, rx) = mpsc::unbounded_channel();
+
+        tokio::spawn(async move {
+            while let Some(Ok(header)) = inner.next().await {
+                let _ = tx.send(header);
+            }
+        });
+
+        UnboundedReceiverStream::new(rx)
+    }
+
+    /// Subscribes to new execution payloads, returns a stream of [`ExecutionPayload`]s.
+    pub async fn subscribe_new_execution_payloads(
+        &self,
+    ) -> UnboundedReceiverStream<ExecutionPayload> {
+        let mut req = Request::new(());
+
+        req.metadata_mut()
+            .append("x-api-key", self.key.parse().unwrap());
+
+        let mut inner = self
+            .client
+            .clone()
+            .subscribe_execution_payloads(req)
+            .await
+            .unwrap()
+            .into_inner();
+
+        let (tx, rx) = mpsc::unbounded_channel();
+
+        tokio::spawn(async move {
+            while let Some(Ok(block)) = inner.next().await {
+                let _ = tx.send(block);
+            }
+        });
+
+        UnboundedReceiverStream::new(rx)
+    }
+
+    pub async fn subscribe_new_beacon_blocks(&self) -> UnboundedReceiverStream<CompactBeaconBlock> {
+        let mut req = Request::new(());
+
+        req.metadata_mut()
+            .append("x-api-key", self.key.parse().unwrap());
+
+        let mut inner = self
+            .client
+            .clone()
+            .subscribe_beacon_blocks(req)
             .await
             .unwrap()
             .into_inner();
