@@ -1,6 +1,9 @@
-use ethers::types::{
-    transaction::eip2930::{AccessList, AccessListItem},
-    OtherFields, Transaction as EthersTx, U256,
+use ethers::{
+    types::{
+        transaction::eip2930::{AccessList, AccessListItem},
+        OtherFields, Transaction as EthersTx, U256,
+    },
+    utils::rlp::{Decodable, Rlp},
 };
 use pin_project::pin_project;
 use tokio::sync::{mpsc, oneshot};
@@ -477,8 +480,12 @@ fn proto_to_tx(proto: Transaction) -> EthersTx {
         2 => Some(2.into()),
         _ => None,
     };
+    let val = if proto.value.is_empty() {
+        ethers::types::U256::zero()
+    } else {
+        ethers::types::U256::decode(&Rlp::new(&proto.value)).unwrap()
+    };
 
-    let val = ethers::types::U256::from_big_endian(proto.value.as_slice());
     let r = ethers::types::U256::from_big_endian(proto.r.as_slice());
     let s = ethers::types::U256::from_big_endian(proto.s.as_slice());
 
