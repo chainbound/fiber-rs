@@ -3,7 +3,7 @@ Rust client package for interacting with a Fiber Network API over gRPC.
 
 ## Installation
 ```bash
-cargo add fiber-rs --git https://github.com/chainbound/fiber-rs
+cargo add fiber --git https://github.com/chainbound/fiber-rs
 ```
 
 ## Usage
