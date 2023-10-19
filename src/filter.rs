@@ -20,7 +20,7 @@ pub struct Filter {
     pub root: Node,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct FilterBuilder {
     pub root: Option<NodeRef>,
     next: Option<NodeRef>,
@@ -62,11 +62,7 @@ mod base64 {
 
 impl FilterBuilder {
     pub fn new() -> FilterBuilder {
-        FilterBuilder {
-            root: None,
-            next: None,
-            last: None,
-        }
+        Self::default()
     }
 
     pub fn to<'a>(&'a mut self, to: &'a str) -> &'a mut FilterBuilder {
@@ -89,8 +85,7 @@ impl FilterBuilder {
                         children.push(new);
                     }
                     None => {
-                        let mut v = Vec::new();
-                        v.push(new);
+                        let v = vec![new];
                         next.children = Some(v);
                     }
                 }
@@ -124,8 +119,7 @@ impl FilterBuilder {
                         children.push(new);
                     }
                     None => {
-                        let mut v = Vec::new();
-                        v.push(new);
+                        let v = vec![new];
                         next.children = Some(v);
                     }
                 }
@@ -159,8 +153,7 @@ impl FilterBuilder {
                         children.push(new);
                     }
                     None => {
-                        let mut v = Vec::new();
-                        v.push(new);
+                        let v = vec![new];
                         next.children = Some(v);
                     }
                 }
@@ -174,7 +167,7 @@ impl FilterBuilder {
         self
     }
 
-    pub fn value<'a>(&'a mut self, v: U256) -> &'a mut FilterBuilder {
+    pub fn value(&mut self, v: U256) -> &mut FilterBuilder {
         let bytes = from_u256(v);
         let new = Rc::new(RefCell::new(Node {
             operand: Some(FilterKV {
@@ -194,8 +187,7 @@ impl FilterBuilder {
                         children.push(new);
                     }
                     None => {
-                        let mut v = Vec::new();
-                        v.push(new);
+                        let v = vec![new];
                         next.children = Some(v);
                     }
                 }
@@ -212,7 +204,7 @@ impl FilterBuilder {
     // Creates and AND node and enters it (i.e. anything after this will be appended)
     // as a child of this node. A reference to the last node will be saved in `last`, and you
     // can re-enter that level using `exit()`.
-    pub fn and<'a>(&'a mut self) -> &'a mut FilterBuilder {
+    pub fn and(&mut self) -> &mut FilterBuilder {
         let new = Rc::new(RefCell::new(Node {
             operand: None,
             operator: Some(Operator::AND),
@@ -229,8 +221,7 @@ impl FilterBuilder {
                         children.push(new.clone());
                     }
                     None => {
-                        let mut v = Vec::new();
-                        v.push(new.clone());
+                        let v = vec![new.clone()];
                         next_ptr.children = Some(v);
                     }
                 }
@@ -249,7 +240,7 @@ impl FilterBuilder {
     // Creates and OR node and enters it (i.e. anything after this will be appended)
     // as a child of this node. A reference to the last node will be saved in `last`, and you
     // can re-enter that level using `exit()`.
-    pub fn or<'a>(&'a mut self) -> &'a mut FilterBuilder {
+    pub fn or(&mut self) -> &mut FilterBuilder {
         let new = Rc::new(RefCell::new(Node {
             operand: None,
             operator: Some(Operator::OR),
@@ -266,8 +257,7 @@ impl FilterBuilder {
                         children.push(new.clone());
                     }
                     None => {
-                        let mut v = Vec::new();
-                        v.push(new.clone());
+                        let v = vec![new.clone()];
                         next_ptr.children = Some(v);
                     }
                 }
@@ -286,7 +276,7 @@ impl FilterBuilder {
 
     /// next tells the builder to create a child at the current `next` pointer
     /// and move there.
-    pub fn exit<'a>(&'a mut self) -> &'a mut FilterBuilder {
+    pub fn exit(&mut self) -> &mut FilterBuilder {
         self.next = self.last.clone();
         self
     }
@@ -323,7 +313,7 @@ mod tests {
 
     #[test]
     fn test_new() {
-        let val = U256::from(10000);
+        // let val = U256::from(10000);
         let mut f = FilterBuilder::new();
         let new = f
             .to("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D")
