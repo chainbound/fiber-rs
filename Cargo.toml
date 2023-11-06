@@ -22,6 +22,8 @@ base64 = "0.13.1"
 hex = "0.4.3"
 chrono = "0.4.23"
 
+[dev-dependencies]
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [build-dependencies]
 tonic-build = "0.8"
