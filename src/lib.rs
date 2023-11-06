@@ -8,7 +8,7 @@ use ethers::{
 use pin_project::pin_project;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
-use tonic::{transport::Channel, Request, Streaming};
+use tonic::{codec::CompressionEncoding, transport::Channel, Request, Streaming};
 
 pub mod api;
 pub mod eth;
@@ -120,7 +120,10 @@ impl Client {
             target
         };
 
-        let mut client = ApiClient::connect(targetstr.to_owned()).await?;
+        let mut client = ApiClient::connect(targetstr.to_owned())
+            .await?
+            .accept_compressed(CompressionEncoding::Gzip)
+            .send_compressed(CompressionEncoding::Gzip);
 
         // Set up the different streams
         let (new_tx_sender, rx) = mpsc::unbounded_channel();
