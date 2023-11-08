@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use ethers::{
     types::{
         transaction::eip2930::{AccessList, AccessListItem},
@@ -54,7 +56,7 @@ pub enum SendType {
     },
 }
 
-struct ClientInner {
+struct Dispatcher {
     cmd_rx: mpsc::UnboundedReceiver<SendType>,
     new_tx_sender: mpsc::UnboundedSender<Transaction>,
     new_raw_tx_sender: mpsc::UnboundedSender<RawTxMsg>,
@@ -66,8 +68,8 @@ struct ClientInner {
     new_raw_tx_seq_responses: Streaming<TxSequenceResponse>,
 }
 
-impl ClientInner {
-    async fn run_loop(mut self) {
+impl Dispatcher {
+    async fn run(mut self) {
         while let Some(cmd) = self.cmd_rx.recv().await {
             match cmd {
                 SendType::Transaction { tx, response } => {
@@ -109,6 +111,10 @@ pub struct Client {
     cmd_tx: mpsc::UnboundedSender<SendType>,
 }
 
+fn append_api_key<T>(req: &mut Request<T>, key: &str) {
+    req.metadata_mut().append("x-api-key", key.parse().unwrap());
+}
+
 impl Client {
     pub async fn connect(
         target: String,
@@ -131,8 +137,7 @@ impl Client {
 
         let mut req = Request::new(rx_stream);
         // Append the api key metadata
-        req.metadata_mut()
-            .append("x-api-key", api_key.parse().unwrap());
+        append_api_key(&mut req, &api_key);
 
         let new_tx_responses = client.send_transaction(req).await?.into_inner();
 
@@ -177,8 +182,8 @@ impl Client {
             cmd_tx,
         };
 
-        // Create the inner client which has access to all the gRPC channels
-        let inner = ClientInner {
+        // The dispatcher will handle request / response messages (like sending transactions)
+        let dispatcher = Dispatcher {
             cmd_rx,
             new_tx_sender,
             new_tx_responses,
@@ -190,8 +195,7 @@ impl Client {
             new_raw_tx_seq_responses,
         };
 
-        // Spawn the loop
-        tokio::task::spawn(inner.run_loop());
+        tokio::task::spawn(dispatcher.run());
 
         Ok(client)
     }
@@ -292,7 +296,9 @@ impl Client {
         Ok((hashes, timestamp))
     }
 
-    /// Subscribes to new transactions, returning a stream of ethers transactions.
+    /// Subscribes to new transactions, returning an [`UnboundedReceiverStream`] of [`EthersTx`].
+    /// Uses the given encoded filter to filter transactions. Note: the actual subscription takes place in
+    /// the background. It will automatically retry every 2s if the stream fails.
     pub async fn subscribe_new_txs(
         &self,
         filter: Option<Vec<u8>>,
@@ -304,79 +310,142 @@ impl Client {
             None => TxFilter { encoded: vec![] },
         };
 
-        let mut req = Request::new(f);
+        let key = self.key.clone();
 
-        req.metadata_mut()
-            .append("x-api-key", self.key.parse().unwrap());
+        let mut req = Request::new(f.clone());
+        append_api_key(&mut req, &key);
 
-        let mut inner = self
-            .client
-            .clone()
-            .subscribe_new_txs(req)
-            .await
-            .unwrap()
-            .into_inner();
+        let mut client = self.client.clone();
 
         let (tx, rx) = mpsc::unbounded_channel();
 
         tokio::spawn(async move {
-            while let Some(Ok(transaction)) = inner.next().await {
-                let _ = tx.send(proto_to_tx(transaction));
+            loop {
+                let mut req = Request::new(f.clone());
+                append_api_key(&mut req, &key);
+
+                let mut stream = match client.subscribe_new_txs(req).await {
+                    Ok(stream) => stream.into_inner(),
+                    Err(e) => {
+                        tracing::error!(error = ?e, "Error in transaction stream, retrying...");
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        continue;
+                    }
+                };
+
+                tracing::info!("Transaction stream established");
+
+                while let Some(item) = stream.next().await {
+                    match item {
+                        Ok(transaction) => {
+                            let _ = tx.send(proto_to_tx(transaction));
+                        }
+                        Err(e) => {
+                            tracing::error!(error = ?e, "Error in transaction stream, retrying...");
+                            // If we get an error, we set the inner stream to None and break out of the loop.
+                            // Next iteration will retry the stream.
+                            break;
+                        }
+                    }
+                }
             }
         });
 
         UnboundedReceiverStream::new(rx)
     }
 
+    /// Subscribes to new execution headers, returning an [`UnboundedReceiverStream`] of [`ExecutionPayloadHeader`].
+    /// Note: the actual subscription takes place in the background.
+    /// It will automatically retry every 2s if the stream fails.
     pub async fn subscribe_new_execution_headers(
         &self,
     ) -> UnboundedReceiverStream<ExecutionPayloadHeader> {
+        let key = self.key.clone();
+
         let mut req = Request::new(());
+        append_api_key(&mut req, &key);
 
-        req.metadata_mut()
-            .append("x-api-key", self.key.parse().unwrap());
-
-        let mut inner = self
-            .client
-            .clone()
-            .subscribe_execution_headers(req)
-            .await
-            .unwrap()
-            .into_inner();
-
+        let mut client = self.client.clone();
         let (tx, rx) = mpsc::unbounded_channel();
 
         tokio::spawn(async move {
-            while let Some(Ok(header)) = inner.next().await {
-                let _ = tx.send(header);
+            loop {
+                let mut req = Request::new(());
+                append_api_key(&mut req, &key);
+
+                let mut stream = match client.subscribe_execution_headers(req).await {
+                    Ok(stream) => stream.into_inner(),
+                    Err(e) => {
+                        tracing::error!(error = ?e, "Error in execution header stream, retrying...");
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        continue;
+                    }
+                };
+
+                tracing::info!("Execution header stream established");
+
+                while let Some(item) = stream.next().await {
+                    match item {
+                        Ok(header) => {
+                            let _ = tx.send(header);
+                        }
+                        Err(e) => {
+                            tracing::error!(error = ?e, "Error in execution header stream, retrying...");
+                            // If we get an error, we set the inner stream to None and break out of the loop.
+                            // Next iteration will retry the stream.
+                            break;
+                        }
+                    }
+                }
             }
         });
 
         UnboundedReceiverStream::new(rx)
     }
 
-    /// Subscribes to new execution payloads, returns a stream of [`ExecutionPayload`]s.
+    /// Subscribes to new execution payloads, returning an [`UnboundedReceiverStream`] of [`ExecutionPayload`].
+    /// Note: the actual subscription takes place in the background.
+    /// It will automatically retry every 2s if the stream fails.
     pub async fn subscribe_new_execution_payloads(
         &self,
     ) -> UnboundedReceiverStream<ExecutionPayload> {
+        let key = self.key.clone();
+
         let mut req = Request::new(());
+        append_api_key(&mut req, &key);
 
-        req.metadata_mut()
-            .append("x-api-key", self.key.parse().unwrap());
-
-        let mut inner = self
-            .client
-            .clone()
-            .subscribe_execution_payloads(req)
-            .await
-            .unwrap()
-            .into_inner();
-
+        let mut client = self.client.clone();
         let (tx, rx) = mpsc::unbounded_channel();
 
         tokio::spawn(async move {
-            while let Some(Ok(block)) = inner.next().await {
-                let _ = tx.send(block);
+            loop {
+                let mut req = Request::new(());
+                append_api_key(&mut req, &key);
+
+                let mut stream = match client.subscribe_execution_payloads(req).await {
+                    Ok(stream) => stream.into_inner(),
+                    Err(e) => {
+                        tracing::error!(error = ?e, "Error in execution payload stream, retrying...");
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        continue;
+                    }
+                };
+
+                tracing::info!("Execution payload stream established");
+
+                while let Some(item) = stream.next().await {
+                    match item {
+                        Ok(payload) => {
+                            let _ = tx.send(payload);
+                        }
+                        Err(e) => {
+                            tracing::error!(error = ?e, "Error in execution payload stream, retrying...");
+                            // If we get an error, we set the inner stream to None and break out of the loop.
+                            // Next iteration will retry the stream.
+                            break;
+                        }
+                    }
+                }
             }
         });
 
@@ -384,24 +453,43 @@ impl Client {
     }
 
     pub async fn subscribe_new_beacon_blocks(&self) -> UnboundedReceiverStream<CompactBeaconBlock> {
+        let key = self.key.clone();
+
         let mut req = Request::new(());
+        append_api_key(&mut req, &key);
 
-        req.metadata_mut()
-            .append("x-api-key", self.key.parse().unwrap());
-
-        let mut inner = self
-            .client
-            .clone()
-            .subscribe_beacon_blocks(req)
-            .await
-            .unwrap()
-            .into_inner();
-
+        let mut client = self.client.clone();
         let (tx, rx) = mpsc::unbounded_channel();
 
         tokio::spawn(async move {
-            while let Some(Ok(block)) = inner.next().await {
-                let _ = tx.send(block);
+            loop {
+                let mut req = Request::new(());
+                append_api_key(&mut req, &key);
+
+                let mut stream = match client.subscribe_beacon_blocks(req).await {
+                    Ok(stream) => stream.into_inner(),
+                    Err(e) => {
+                        tracing::error!(error = ?e, "Error in beacon block stream, retrying...");
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        continue;
+                    }
+                };
+
+                tracing::info!("Beacon block stream established");
+
+                while let Some(item) = stream.next().await {
+                    match item {
+                        Ok(payload) => {
+                            let _ = tx.send(payload);
+                        }
+                        Err(e) => {
+                            tracing::error!(error = ?e, "Error in beacon block stream, retrying...");
+                            // If we get an error, we set the inner stream to None and break out of the loop.
+                            // Next iteration will retry the stream.
+                            break;
+                        }
+                    }
+                }
             }
         });
 

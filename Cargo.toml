@@ -9,6 +9,7 @@ edition = "2021"
 prost = "0.12"
 tonic = { version = "0.10", features = ["gzip", "prost"] }
 tokio = { version = "1.21.1", features = ["macros", "rt-multi-thread"] }
+tracing = "0.1"
 ethers = "2"
 tokio-stream = "0.1"
 async-stream = "0.3"
