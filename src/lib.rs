@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use ethers::{
     types::{
         transaction::eip2930::{AccessList, AccessListItem},
@@ -54,62 +56,182 @@ pub enum SendType {
     },
 }
 
-struct ClientInner {
+struct Dispatcher {
     cmd_rx: mpsc::UnboundedReceiver<SendType>,
-    new_tx_sender: mpsc::UnboundedSender<Transaction>,
-    new_raw_tx_sender: mpsc::UnboundedSender<RawTxMsg>,
-    new_tx_seq_sender: mpsc::UnboundedSender<TxSequenceMsg>,
-    new_raw_tx_seq_sender: mpsc::UnboundedSender<RawTxSequenceMsg>,
-    new_tx_responses: Streaming<TransactionResponse>,
-    new_raw_tx_responses: Streaming<TransactionResponse>,
-    new_tx_seq_responses: Streaming<TxSequenceResponse>,
-    new_raw_tx_seq_responses: Streaming<TxSequenceResponse>,
+    client: ApiClient<Channel>,
+    api_key: String,
 }
 
-impl ClientInner {
-    async fn run_loop(mut self) {
-        while let Some(cmd) = self.cmd_rx.recv().await {
-            match cmd {
-                SendType::Transaction { tx, response } => {
-                    self.new_tx_sender.send(tx).unwrap();
+impl Dispatcher {
+    async fn run(mut self) {
+        let api_key = self.api_key.clone();
+        let mut client = self.client;
 
-                    if let Some(res) = self.new_tx_responses.next().await {
-                        let _ = response.send(res.unwrap());
-                    }
+        loop {
+            // Set up the different streams
+            let (new_tx_sender, rx) = mpsc::unbounded_channel();
+            let rx_stream = UnboundedReceiverStream::new(rx);
+
+            let mut req = Request::new(rx_stream);
+            // Append the api key metadata
+            append_api_key(&mut req, &api_key);
+
+            let mut new_tx_responses = match client.send_transaction(req).await {
+                Ok(stream) => stream.into_inner(),
+                Err(e) => {
+                    tracing::error!(error = ?e, "Error in transaction stream, retrying...");
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    continue;
                 }
-                SendType::RawTransaction { msg, response } => {
-                    self.new_raw_tx_sender.send(msg).unwrap();
+            };
 
-                    if let Some(res) = self.new_raw_tx_responses.next().await {
-                        let _ = response.send(res.unwrap());
-                    }
+            let (new_raw_tx_sender, rx) = mpsc::unbounded_channel();
+            let rx_stream = UnboundedReceiverStream::new(rx);
+
+            let mut req = Request::new(rx_stream);
+            // Append the api key metadata
+            append_api_key(&mut req, &api_key);
+
+            let mut new_raw_tx_responses = match client.send_raw_transaction(req).await {
+                Ok(stream) => stream.into_inner(),
+                Err(e) => {
+                    tracing::error!(error = ?e, "Error in raw transaction stream, retrying...");
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    continue;
                 }
-                SendType::TransactionSequence { msg, response } => {
-                    self.new_tx_seq_sender.send(msg).unwrap();
+            };
 
-                    if let Some(res) = self.new_tx_seq_responses.next().await {
-                        let _ = response.send(res.unwrap());
-                    }
+            let (new_tx_seq_sender, rx) = mpsc::unbounded_channel();
+            let rx_stream = UnboundedReceiverStream::new(rx);
+
+            let mut req = Request::new(rx_stream);
+            // Append the api key metadata
+            append_api_key(&mut req, &api_key);
+
+            let mut new_tx_seq_responses = match client.send_transaction_sequence(req).await {
+                Ok(stream) => stream.into_inner(),
+                Err(e) => {
+                    tracing::error!(error = ?e, "Error in transaction sequence stream, retrying...");
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    continue;
                 }
-                SendType::RawTransactionSequence { msg, response } => {
-                    self.new_raw_tx_seq_sender.send(msg).unwrap();
+            };
 
-                    if let Some(res) = self.new_raw_tx_seq_responses.next().await {
-                        let _ = response.send(res.unwrap());
+            let (new_raw_tx_seq_sender, rx) = mpsc::unbounded_channel();
+            let rx_stream = UnboundedReceiverStream::new(rx);
+
+            let mut req = Request::new(rx_stream);
+            // Append the api key metadata
+            append_api_key(&mut req, &api_key);
+
+            let mut new_raw_tx_seq_responses = match client.send_raw_transaction_sequence(req).await
+            {
+                Ok(stream) => stream.into_inner(),
+                Err(e) => {
+                    tracing::error!(error = ?e, "Error in raw transaction sequence stream, retrying...");
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    continue;
+                }
+            };
+
+            while let Some(cmd) = self.cmd_rx.recv().await {
+                match cmd {
+                    SendType::Transaction { tx, response } => {
+                        if new_tx_sender.send(tx).is_err() {
+                            tracing::error!("Failed sending transaction");
+                            break;
+                        }
+
+                        if let Some(res) = new_tx_responses.next().await {
+                            match res {
+                                Ok(res) => {
+                                    let _ = response.send(res);
+                                }
+                                Err(e) => {
+                                    tracing::error!(error = ?e, "Error in response stream, retrying...");
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    SendType::RawTransaction { msg, response } => {
+                        if new_raw_tx_sender.send(msg).is_err() {
+                            tracing::error!("Failed sending raw transaction");
+                            break;
+                        }
+
+                        if let Some(res) = new_raw_tx_responses.next().await {
+                            match res {
+                                Ok(res) => {
+                                    let _ = response.send(res);
+                                }
+                                Err(e) => {
+                                    tracing::error!(error = ?e, "Error in response stream, retrying...");
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    SendType::TransactionSequence { msg, response } => {
+                        if new_tx_seq_sender.send(msg).is_err() {
+                            tracing::error!("Failed sending transaction sequence");
+                            break;
+                        }
+
+                        if let Some(res) = new_tx_seq_responses.next().await {
+                            match res {
+                                Ok(res) => {
+                                    let _ = response.send(res);
+                                }
+                                Err(e) => {
+                                    tracing::error!(error = ?e, "Error in response stream, retrying...");
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    SendType::RawTransactionSequence { msg, response } => {
+                        if new_raw_tx_seq_sender.send(msg).is_err() {
+                            tracing::error!("Failed sending raw transaction sequence");
+                            break;
+                        }
+
+                        if let Some(res) = new_raw_tx_seq_responses.next().await {
+                            match res {
+                                Ok(res) => {
+                                    let _ = response.send(res);
+                                }
+                                Err(e) => {
+                                    tracing::error!(error = ?e, "Error in response stream, retrying...");
+                                    break;
+                                }
+                            }
+                        }
                     }
                 }
             }
+
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
     }
 }
 
+/// A client for interacting with the Fiber Network.
+/// This wraps the inner [`ApiClient`] and provides a more ergonomic interface, as well as
+/// automatic retries for streams.
 pub struct Client {
     key: String,
     client: ApiClient<Channel>,
     cmd_tx: mpsc::UnboundedSender<SendType>,
 }
 
+/// Appends the api key metadata to the request, keyed by x-api-key.
+fn append_api_key<T>(req: &mut Request<T>, key: &str) {
+    req.metadata_mut().append("x-api-key", key.parse().unwrap());
+}
+
 impl Client {
+    /// Connects to the given gRPC target with the API key, returning a [`Client`] instance.
     pub async fn connect(
         target: String,
         api_key: String,
@@ -120,56 +242,20 @@ impl Client {
             target
         };
 
-        let mut client = ApiClient::connect(targetstr.to_owned())
+        // Set up the inner gRPC connection
+        let client = ApiClient::connect(targetstr.to_owned())
             .await?
             .accept_compressed(CompressionEncoding::Gzip)
             .send_compressed(CompressionEncoding::Gzip);
 
-        // Set up the different streams
-        let (new_tx_sender, rx) = mpsc::unbounded_channel();
-        let rx_stream = UnboundedReceiverStream::new(rx);
-
-        let mut req = Request::new(rx_stream);
-        // Append the api key metadata
-        req.metadata_mut()
-            .append("x-api-key", api_key.parse().unwrap());
-
-        let new_tx_responses = client.send_transaction(req).await?.into_inner();
-
-        let (new_raw_tx_sender, rx) = mpsc::unbounded_channel();
-        let rx_stream = UnboundedReceiverStream::new(rx);
-
-        let mut req = Request::new(rx_stream);
-        // Append the api key metadata
-        req.metadata_mut()
-            .append("x-api-key", api_key.parse().unwrap());
-
-        let new_raw_tx_responses = client.send_raw_transaction(req).await?.into_inner();
-
-        let (new_tx_seq_sender, rx) = mpsc::unbounded_channel();
-        let rx_stream = UnboundedReceiverStream::new(rx);
-
-        let mut req = Request::new(rx_stream);
-        // Append the api key metadata
-        req.metadata_mut()
-            .append("x-api-key", api_key.parse().unwrap());
-
-        let new_tx_seq_responses = client.send_transaction_sequence(req).await?.into_inner();
-
-        let (new_raw_tx_seq_sender, rx) = mpsc::unbounded_channel();
-        let rx_stream = UnboundedReceiverStream::new(rx);
-
-        let mut req = Request::new(rx_stream);
-        // Append the api key metadata
-        req.metadata_mut()
-            .append("x-api-key", api_key.parse().unwrap());
-
-        let new_raw_tx_seq_responses = client
-            .send_raw_transaction_sequence(req)
-            .await?
-            .into_inner();
-
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+
+        // The dispatcher will handle request / response messages (like sending transactions)
+        let dispatcher = Dispatcher {
+            cmd_rx,
+            api_key: api_key.clone(),
+            client: client.clone(),
+        };
 
         let client = Client {
             client,
@@ -177,21 +263,7 @@ impl Client {
             cmd_tx,
         };
 
-        // Create the inner client which has access to all the gRPC channels
-        let inner = ClientInner {
-            cmd_rx,
-            new_tx_sender,
-            new_tx_responses,
-            new_raw_tx_sender,
-            new_raw_tx_responses,
-            new_tx_seq_sender,
-            new_tx_seq_responses,
-            new_raw_tx_seq_sender,
-            new_raw_tx_seq_responses,
-        };
-
-        // Spawn the loop
-        tokio::task::spawn(inner.run_loop());
+        tokio::task::spawn(dispatcher.run());
 
         Ok(client)
     }
@@ -292,7 +364,9 @@ impl Client {
         Ok((hashes, timestamp))
     }
 
-    /// Subscribes to new transactions, returning a stream of ethers transactions.
+    /// Subscribes to new transactions, returning an [`UnboundedReceiverStream`] of [`EthersTx`].
+    /// Uses the given encoded filter to filter transactions. Note: the actual subscription takes place in
+    /// the background. It will automatically retry every 2s if the stream fails.
     pub async fn subscribe_new_txs(
         &self,
         filter: Option<Vec<u8>>,
@@ -304,79 +378,142 @@ impl Client {
             None => TxFilter { encoded: vec![] },
         };
 
-        let mut req = Request::new(f);
+        let key = self.key.clone();
 
-        req.metadata_mut()
-            .append("x-api-key", self.key.parse().unwrap());
+        let mut req = Request::new(f.clone());
+        append_api_key(&mut req, &key);
 
-        let mut inner = self
-            .client
-            .clone()
-            .subscribe_new_txs(req)
-            .await
-            .unwrap()
-            .into_inner();
+        let mut client = self.client.clone();
 
         let (tx, rx) = mpsc::unbounded_channel();
 
         tokio::spawn(async move {
-            while let Some(Ok(transaction)) = inner.next().await {
-                let _ = tx.send(proto_to_tx(transaction));
+            loop {
+                let mut req = Request::new(f.clone());
+                append_api_key(&mut req, &key);
+
+                let mut stream = match client.subscribe_new_txs(req).await {
+                    Ok(stream) => stream.into_inner(),
+                    Err(e) => {
+                        tracing::error!(error = ?e, "Error in transaction stream, retrying...");
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        continue;
+                    }
+                };
+
+                tracing::info!("Transaction stream established");
+
+                while let Some(item) = stream.next().await {
+                    match item {
+                        Ok(transaction) => {
+                            let _ = tx.send(proto_to_tx(transaction));
+                        }
+                        Err(e) => {
+                            tracing::error!(error = ?e, "Error in transaction stream, retrying...");
+                            // If we get an error, we set the inner stream to None and break out of the loop.
+                            // Next iteration will retry the stream.
+                            break;
+                        }
+                    }
+                }
             }
         });
 
         UnboundedReceiverStream::new(rx)
     }
 
+    /// Subscribes to new execution headers, returning an [`UnboundedReceiverStream`] of [`ExecutionPayloadHeader`].
+    /// Note: the actual subscription takes place in the background.
+    /// It will automatically retry every 2s if the stream fails.
     pub async fn subscribe_new_execution_headers(
         &self,
     ) -> UnboundedReceiverStream<ExecutionPayloadHeader> {
+        let key = self.key.clone();
+
         let mut req = Request::new(());
+        append_api_key(&mut req, &key);
 
-        req.metadata_mut()
-            .append("x-api-key", self.key.parse().unwrap());
-
-        let mut inner = self
-            .client
-            .clone()
-            .subscribe_execution_headers(req)
-            .await
-            .unwrap()
-            .into_inner();
-
+        let mut client = self.client.clone();
         let (tx, rx) = mpsc::unbounded_channel();
 
         tokio::spawn(async move {
-            while let Some(Ok(header)) = inner.next().await {
-                let _ = tx.send(header);
+            loop {
+                let mut req = Request::new(());
+                append_api_key(&mut req, &key);
+
+                let mut stream = match client.subscribe_execution_headers(req).await {
+                    Ok(stream) => stream.into_inner(),
+                    Err(e) => {
+                        tracing::error!(error = ?e, "Error in execution header stream, retrying...");
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        continue;
+                    }
+                };
+
+                tracing::info!("Execution header stream established");
+
+                while let Some(item) = stream.next().await {
+                    match item {
+                        Ok(header) => {
+                            let _ = tx.send(header);
+                        }
+                        Err(e) => {
+                            tracing::error!(error = ?e, "Error in execution header stream, retrying...");
+                            // If we get an error, we set the inner stream to None and break out of the loop.
+                            // Next iteration will retry the stream.
+                            break;
+                        }
+                    }
+                }
             }
         });
 
         UnboundedReceiverStream::new(rx)
     }
 
-    /// Subscribes to new execution payloads, returns a stream of [`ExecutionPayload`]s.
+    /// Subscribes to new execution payloads, returning an [`UnboundedReceiverStream`] of [`ExecutionPayload`].
+    /// Note: the actual subscription takes place in the background.
+    /// It will automatically retry every 2s if the stream fails.
     pub async fn subscribe_new_execution_payloads(
         &self,
     ) -> UnboundedReceiverStream<ExecutionPayload> {
+        let key = self.key.clone();
+
         let mut req = Request::new(());
+        append_api_key(&mut req, &key);
 
-        req.metadata_mut()
-            .append("x-api-key", self.key.parse().unwrap());
-
-        let mut inner = self
-            .client
-            .clone()
-            .subscribe_execution_payloads(req)
-            .await
-            .unwrap()
-            .into_inner();
-
+        let mut client = self.client.clone();
         let (tx, rx) = mpsc::unbounded_channel();
 
         tokio::spawn(async move {
-            while let Some(Ok(block)) = inner.next().await {
-                let _ = tx.send(block);
+            loop {
+                let mut req = Request::new(());
+                append_api_key(&mut req, &key);
+
+                let mut stream = match client.subscribe_execution_payloads(req).await {
+                    Ok(stream) => stream.into_inner(),
+                    Err(e) => {
+                        tracing::error!(error = ?e, "Error in execution payload stream, retrying...");
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        continue;
+                    }
+                };
+
+                tracing::info!("Execution payload stream established");
+
+                while let Some(item) = stream.next().await {
+                    match item {
+                        Ok(payload) => {
+                            let _ = tx.send(payload);
+                        }
+                        Err(e) => {
+                            tracing::error!(error = ?e, "Error in execution payload stream, retrying...");
+                            // If we get an error, we set the inner stream to None and break out of the loop.
+                            // Next iteration will retry the stream.
+                            break;
+                        }
+                    }
+                }
             }
         });
 
@@ -384,24 +521,43 @@ impl Client {
     }
 
     pub async fn subscribe_new_beacon_blocks(&self) -> UnboundedReceiverStream<CompactBeaconBlock> {
+        let key = self.key.clone();
+
         let mut req = Request::new(());
+        append_api_key(&mut req, &key);
 
-        req.metadata_mut()
-            .append("x-api-key", self.key.parse().unwrap());
-
-        let mut inner = self
-            .client
-            .clone()
-            .subscribe_beacon_blocks(req)
-            .await
-            .unwrap()
-            .into_inner();
-
+        let mut client = self.client.clone();
         let (tx, rx) = mpsc::unbounded_channel();
 
         tokio::spawn(async move {
-            while let Some(Ok(block)) = inner.next().await {
-                let _ = tx.send(block);
+            loop {
+                let mut req = Request::new(());
+                append_api_key(&mut req, &key);
+
+                let mut stream = match client.subscribe_beacon_blocks(req).await {
+                    Ok(stream) => stream.into_inner(),
+                    Err(e) => {
+                        tracing::error!(error = ?e, "Error in beacon block stream, retrying...");
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        continue;
+                    }
+                };
+
+                tracing::info!("Beacon block stream established");
+
+                while let Some(item) = stream.next().await {
+                    match item {
+                        Ok(payload) => {
+                            let _ = tx.send(payload);
+                        }
+                        Err(e) => {
+                            tracing::error!(error = ?e, "Error in beacon block stream, retrying...");
+                            // If we get an error, we set the inner stream to None and break out of the loop.
+                            // Next iteration will retry the stream.
+                            break;
+                        }
+                    }
+                }
             }
         });
 
