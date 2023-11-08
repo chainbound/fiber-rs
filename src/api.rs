@@ -55,7 +55,7 @@ pub mod api_client {
         /// Attempt to create a new client by connecting to a given endpoint.
         pub async fn connect<D>(dst: D) -> Result<Self, tonic::transport::Error>
         where
-            D: std::convert::TryInto<tonic::transport::Endpoint>,
+            D: TryInto<tonic::transport::Endpoint>,
             D::Error: Into<StdError>,
         {
             let conn = tonic::transport::Endpoint::new(dst)?.connect().await?;
@@ -111,11 +111,27 @@ pub mod api_client {
             self.inner = self.inner.accept_compressed(encoding);
             self
         }
+        /// Limits the maximum size of a decoded message.
+        ///
+        /// Default: `4MB`
+        #[must_use]
+        pub fn max_decoding_message_size(mut self, limit: usize) -> Self {
+            self.inner = self.inner.max_decoding_message_size(limit);
+            self
+        }
+        /// Limits the maximum size of an encoded message.
+        ///
+        /// Default: `usize::MAX`
+        #[must_use]
+        pub fn max_encoding_message_size(mut self, limit: usize) -> Self {
+            self.inner = self.inner.max_encoding_message_size(limit);
+            self
+        }
         /// Opens a new transaction stream with the given filter.
         pub async fn subscribe_new_txs(
             &mut self,
             request: impl tonic::IntoRequest<super::TxFilter>,
-        ) -> Result<
+        ) -> std::result::Result<
             tonic::Response<tonic::codec::Streaming<super::super::eth::Transaction>>,
             tonic::Status,
         > {
@@ -130,7 +146,9 @@ pub mod api_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static("/api.API/SubscribeNewTxs");
-            self.inner.server_streaming(request.into_request(), path, codec).await
+            let mut req = request.into_request();
+            req.extensions_mut().insert(GrpcMethod::new("api.API", "SubscribeNewTxs"));
+            self.inner.server_streaming(req, path, codec).await
         }
         /// Sends a signed transaction to the network.
         pub async fn send_transaction(
@@ -138,7 +156,7 @@ pub mod api_client {
             request: impl tonic::IntoStreamingRequest<
                 Message = super::super::eth::Transaction,
             >,
-        ) -> Result<
+        ) -> std::result::Result<
             tonic::Response<tonic::codec::Streaming<super::TransactionResponse>>,
             tonic::Status,
         > {
@@ -153,13 +171,15 @@ pub mod api_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static("/api.API/SendTransaction");
-            self.inner.streaming(request.into_streaming_request(), path, codec).await
+            let mut req = request.into_streaming_request();
+            req.extensions_mut().insert(GrpcMethod::new("api.API", "SendTransaction"));
+            self.inner.streaming(req, path, codec).await
         }
         /// Sends a signed, RLP encoded transaction to the network
         pub async fn send_raw_transaction(
             &mut self,
             request: impl tonic::IntoStreamingRequest<Message = super::RawTxMsg>,
-        ) -> Result<
+        ) -> std::result::Result<
             tonic::Response<tonic::codec::Streaming<super::TransactionResponse>>,
             tonic::Status,
         > {
@@ -176,13 +196,16 @@ pub mod api_client {
             let path = http::uri::PathAndQuery::from_static(
                 "/api.API/SendRawTransaction",
             );
-            self.inner.streaming(request.into_streaming_request(), path, codec).await
+            let mut req = request.into_streaming_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("api.API", "SendRawTransaction"));
+            self.inner.streaming(req, path, codec).await
         }
         /// Sends a sequence of signed transactions to the network.
         pub async fn send_transaction_sequence(
             &mut self,
             request: impl tonic::IntoStreamingRequest<Message = super::TxSequenceMsg>,
-        ) -> Result<
+        ) -> std::result::Result<
             tonic::Response<tonic::codec::Streaming<super::TxSequenceResponse>>,
             tonic::Status,
         > {
@@ -199,13 +222,16 @@ pub mod api_client {
             let path = http::uri::PathAndQuery::from_static(
                 "/api.API/SendTransactionSequence",
             );
-            self.inner.streaming(request.into_streaming_request(), path, codec).await
+            let mut req = request.into_streaming_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("api.API", "SendTransactionSequence"));
+            self.inner.streaming(req, path, codec).await
         }
         /// Sends a sequence of signed, RLP encoded transactions to the network.
         pub async fn send_raw_transaction_sequence(
             &mut self,
             request: impl tonic::IntoStreamingRequest<Message = super::RawTxSequenceMsg>,
-        ) -> Result<
+        ) -> std::result::Result<
             tonic::Response<tonic::codec::Streaming<super::TxSequenceResponse>>,
             tonic::Status,
         > {
@@ -222,13 +248,16 @@ pub mod api_client {
             let path = http::uri::PathAndQuery::from_static(
                 "/api.API/SendRawTransactionSequence",
             );
-            self.inner.streaming(request.into_streaming_request(), path, codec).await
+            let mut req = request.into_streaming_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("api.API", "SendRawTransactionSequence"));
+            self.inner.streaming(req, path, codec).await
         }
         /// Opens a stream of new execution payloads.
         pub async fn subscribe_execution_payloads(
             &mut self,
             request: impl tonic::IntoRequest<()>,
-        ) -> Result<
+        ) -> std::result::Result<
             tonic::Response<
                 tonic::codec::Streaming<super::super::eth::ExecutionPayload>,
             >,
@@ -247,13 +276,16 @@ pub mod api_client {
             let path = http::uri::PathAndQuery::from_static(
                 "/api.API/SubscribeExecutionPayloads",
             );
-            self.inner.server_streaming(request.into_request(), path, codec).await
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("api.API", "SubscribeExecutionPayloads"));
+            self.inner.server_streaming(req, path, codec).await
         }
         /// Opens a stream of new execution payload headers.
         pub async fn subscribe_execution_headers(
             &mut self,
             request: impl tonic::IntoRequest<()>,
-        ) -> Result<
+        ) -> std::result::Result<
             tonic::Response<
                 tonic::codec::Streaming<super::super::eth::ExecutionPayloadHeader>,
             >,
@@ -272,14 +304,17 @@ pub mod api_client {
             let path = http::uri::PathAndQuery::from_static(
                 "/api.API/SubscribeExecutionHeaders",
             );
-            self.inner.server_streaming(request.into_request(), path, codec).await
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("api.API", "SubscribeExecutionHeaders"));
+            self.inner.server_streaming(req, path, codec).await
         }
         /// Opens a stream of new beacon blocks. The beacon blocks are "compacted", meaning that the
         /// execution payload is not included.
         pub async fn subscribe_beacon_blocks(
             &mut self,
             request: impl tonic::IntoRequest<()>,
-        ) -> Result<
+        ) -> std::result::Result<
             tonic::Response<
                 tonic::codec::Streaming<super::super::eth::CompactBeaconBlock>,
             >,
@@ -298,7 +333,10 @@ pub mod api_client {
             let path = http::uri::PathAndQuery::from_static(
                 "/api.API/SubscribeBeaconBlocks",
             );
-            self.inner.server_streaming(request.into_request(), path, codec).await
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("api.API", "SubscribeBeaconBlocks"));
+            self.inner.server_streaming(req, path, codec).await
         }
     }
 }

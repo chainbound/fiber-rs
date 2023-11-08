@@ -26,4 +26,4 @@ chrono = "0.4.23"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [build-dependencies]
-tonic-build = "0.8"
+tonic-build = "0.10"
