@@ -134,6 +134,8 @@ impl Dispatcher {
                 }
             };
 
+            tracing::info!("All bi-directional streams established. Listening for commands...");
+
             while let Some(cmd) = self.cmd_rx.recv().await {
                 match cmd {
                     SendType::Transaction { tx, response } => {
@@ -245,8 +247,7 @@ impl Client {
         // Set up the inner gRPC connection
         let client = ApiClient::connect(targetstr.to_owned())
             .await?
-            .accept_compressed(CompressionEncoding::Gzip)
-            .send_compressed(CompressionEncoding::Gzip);
+            .accept_compressed(CompressionEncoding::Gzip);
 
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
 
