@@ -7,6 +7,7 @@ cargo add fiber --git https://github.com/chainbound/fiber-rs
 ```
 
 ## Usage
+`fiber-rs` prints traces to the `fiber` target. To see them, run your program with `RUST_LOG=fiber=info`.
 
 ### Connecting
 ```rs
@@ -19,8 +20,11 @@ async fn main() {
 ```
 
 ### Subscriptions
+All subscriptions return a `Stream` (`UnboundedReceiverStream`) of the specified type.
+If the underlying gRPC stream fails due to connection issues, it will automatically be retried.
+
 #### Transactions
-Subscribing to transactions will return an `TxStream`, yielding `ethers.Transaction`
+Subscribing to transactions will return a `Stream`, yielding [`ethers::types::Transaction`](https://docs.rs/ethers/latest/ethers/types/struct.Transaction.html)
 for every new transaction that's received.
 
 **Example:**
