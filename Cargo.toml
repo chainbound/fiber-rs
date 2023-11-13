@@ -22,6 +22,8 @@ serde_repr = "0.1"
 base64 = "0.13.1"
 hex = "0.4.3"
 chrono = "0.4.23"
+reth-primitives = { git = "https://github.com/chainbound/reth", branch = "patch/fiber" }
+reth-rlp = { package = "alloy-rlp", version = "0.3" }
 
 [dev-dependencies]
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
