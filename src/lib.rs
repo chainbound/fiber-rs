@@ -18,8 +18,8 @@ pub mod filter;
 pub mod types;
 
 use api::{
-    api_client::ApiClient, RawTxMsg, RawTxSequenceMsg, TransactionResponse, TxFilter,
-    TxSequenceMsg, TxSequenceResponse,
+    api_client::ApiClient, BlockSubmissionMsg, BlockSubmissionResponse, RawTxMsg, RawTxSequenceMsg,
+    TransactionResponse, TxFilter, TxSequenceMsg, TxSequenceResponse,
 };
 use eth::{CompactBeaconBlock, ExecutionPayload, ExecutionPayloadHeader, Transaction};
 
@@ -53,6 +53,10 @@ pub enum SendType {
     RawTransactionSequence {
         msg: RawTxSequenceMsg,
         response: oneshot::Sender<TxSequenceResponse>,
+    },
+    Block {
+        msg: BlockSubmissionMsg,
+        response: oneshot::Sender<BlockSubmissionResponse>,
     },
 }
 
@@ -134,6 +138,21 @@ impl Dispatcher {
                 }
             };
 
+            let (new_block_sender, rx) = mpsc::unbounded_channel();
+            let rx_stream = UnboundedReceiverStream::new(rx);
+
+            let mut req = Request::new(rx_stream);
+            append_api_key(&mut req, &api_key);
+
+            let mut new_block_responses = match client.submit_block_stream(req).await {
+                Ok(stream) => stream.into_inner(),
+                Err(e) => {
+                    tracing::error!(error = ?e, "Error in block submission stream, retrying...");
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    continue;
+                }
+            };
+
             tracing::info!("All bi-directional streams established. Listening for commands...");
 
             while let Some(cmd) = self.cmd_rx.recv().await {
@@ -210,6 +229,24 @@ impl Dispatcher {
                             }
                         }
                     }
+                    SendType::Block { msg, response } => {
+                        if new_block_sender.send(msg).is_err() {
+                            tracing::error!("Failed sending block");
+                            break;
+                        }
+
+                        if let Some(res) = new_block_responses.next().await {
+                            match res {
+                                Ok(res) => {
+                                    let _ = response.send(res);
+                                }
+                                Err(e) => {
+                                    tracing::error!(error = ?e, "Error in response stream, retrying...");
+                                    break;
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -247,6 +284,7 @@ impl Client {
         // Set up the inner gRPC connection
         let client = ApiClient::connect(targetstr.to_owned())
             .await?
+            .send_compressed(CompressionEncoding::Gzip)
             .accept_compressed(CompressionEncoding::Gzip);
 
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -363,6 +401,22 @@ impl Client {
             .collect();
 
         Ok((hashes, timestamp))
+    }
+
+    /// Publish an SSZ encoded block to the Fiber Network. Returns [`BlockSubmissionResponse`] which
+    /// contains information about the newly published block.
+    pub async fn publish_block(
+        &self,
+        ssz_block: Vec<u8>,
+    ) -> Result<BlockSubmissionResponse, Box<dyn std::error::Error>> {
+        let (res, rx) = oneshot::channel();
+
+        let _ = self.cmd_tx.send(SendType::Block {
+            msg: BlockSubmissionMsg { ssz_block },
+            response: res,
+        });
+
+        Ok(rx.await?)
     }
 
     /// Subscribes to new transactions, returning an [`UnboundedReceiverStream`] of [`EthersTx`].

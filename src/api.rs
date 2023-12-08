@@ -36,6 +36,25 @@ pub struct RawTxMsg {
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
+pub struct BlockSubmissionMsg {
+    #[prost(bytes = "vec", tag = "1")]
+    pub ssz_block: ::prost::alloc::vec::Vec<u8>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct BlockSubmissionResponse {
+    /// The slot of the block.
+    #[prost(uint64, tag = "1")]
+    pub slot: u64,
+    /// The re-calculated state root after reconstructing the block.
+    #[prost(bytes = "vec", tag = "2")]
+    pub state_root: ::prost::alloc::vec::Vec<u8>,
+    /// Timestamp in microseconds.
+    #[prost(uint64, tag = "3")]
+    pub timestamp: u64,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TransactionResponse {
     #[prost(string, tag = "1")]
     pub hash: ::prost::alloc::string::String,
@@ -337,6 +356,35 @@ pub mod api_client {
             req.extensions_mut()
                 .insert(GrpcMethod::new("api.API", "SubscribeBeaconBlocks"));
             self.inner.server_streaming(req, path, codec).await
+        }
+        /// Opens a bi-directional stream for new block submissions. The client stream is used to send
+        /// SSZ-encoded beacon blocks, and the server stream is used to send back the state_root, slot and
+        /// a local timestamp as a confirmation that the block was seen and handled.
+        pub async fn submit_block_stream(
+            &mut self,
+            request: impl tonic::IntoStreamingRequest<
+                Message = super::BlockSubmissionMsg,
+            >,
+        ) -> std::result::Result<
+            tonic::Response<tonic::codec::Streaming<super::BlockSubmissionResponse>>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/api.API/SubmitBlockStream",
+            );
+            let mut req = request.into_streaming_request();
+            req.extensions_mut().insert(GrpcMethod::new("api.API", "SubmitBlockStream"));
+            self.inner.streaming(req, path, codec).await
         }
     }
 }
