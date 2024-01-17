@@ -30,6 +30,7 @@ for every new transaction that's received.
 **Example:**
 ```rs
 use fiber::Client;
+use tokio_stream::StreamExt;
 
 #[tokio::main]
 async fn main() {
@@ -52,6 +53,7 @@ You can apply filters to the transaction stream using `fiber::filter::Filter`. T
 for constructing a filter, with a couple of examples below.
 ```rs
 use fiber::{Client, filter::FilterBuilder};
+use tokio_stream::StreamExt;
 
 #[tokio::main]
 async fn main() {
@@ -95,6 +97,7 @@ that were executed in that block.
 **Example:**
 ```rs
 use fiber::Client;
+use tokio_stream::StreamExt;
 
 #[tokio::main]
 async fn main() {
@@ -118,6 +121,7 @@ block metadata without having to fetch all the transactions, which offers a late
 **Example:**
 ```rs
 use fiber::Client;
+use tokio_stream::StreamExt;
 
 #[tokio::main]
 async fn main() {
@@ -140,6 +144,7 @@ Returns a stream of consensus-layer [`BeaconBlock`](https://github.com/ethereum/
 **Example:**
 ```rs
 use fiber::Client;
+use tokio_stream::StreamExt;
 
 #[tokio::main]
 async fn main() {
