@@ -1,4 +1,4 @@
-use ethers::types::{Address, Bytes, U256};
+use alloy_primitives::{Address, Bytes, U256};
 use hex;
 use serde::Serialize;
 use serde_repr::Serialize_repr;
@@ -70,7 +70,7 @@ impl FilterBuilder {
         let new = Rc::new(RefCell::new(Node {
             operand: Some(FilterKV {
                 key: String::from("to"),
-                value: addr.as_bytes().to_vec(),
+                value: addr.to_vec(),
             }),
             operator: None,
             children: None,
@@ -104,7 +104,7 @@ impl FilterBuilder {
         let new = Rc::new(RefCell::new(Node {
             operand: Some(FilterKV {
                 key: String::from("from"),
-                value: addr.as_bytes().to_vec(),
+                value: addr.to_vec(),
             }),
             operator: None,
             children: None,

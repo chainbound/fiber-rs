@@ -10,7 +10,6 @@ prost = "0.12"
 tonic = { version = "0.10", features = ["gzip", "prost"] }
 tokio = { version = "1.21.1", features = ["macros", "rt-multi-thread"] }
 tracing = "0.1"
-ethers = "2"
 tokio-stream = "0.1"
 async-stream = "0.3"
 futures-core = "0.3"
@@ -22,8 +21,13 @@ serde_repr = "0.1"
 base64 = "0.13.1"
 hex = "0.4.3"
 chrono = "0.4.23"
-reth-primitives = { git = "https://github.com/chainbound/reth", branch = "patch/fiber" }
-reth-rlp = { package = "alloy-rlp", version = "0.3" }
+alloy-primitives = "0.6.0"
+alloy-rlp = "0.3.4"
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy" }
+
+# ethers = "2.0.0"
+# reth-primitives = { git = "https://github.com/chainbound/reth", branch = "patch/fiber" }
+# reth-rlp = { package = "alloy-rlp", version = "0.3" }
 
 [dev-dependencies]
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

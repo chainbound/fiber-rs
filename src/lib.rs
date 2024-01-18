@@ -1,12 +1,9 @@
 use std::time::Duration;
 
-use ethers::{
-    types::{
-        transaction::eip2930::{AccessList, AccessListItem},
-        OtherFields, Transaction as EthersTx, U256,
-    },
-    utils::rlp::{Decodable, Rlp},
-};
+use alloy_primitives::{ruint::support::num_traits::ToPrimitive, U128};
+use alloy_primitives::{Address, U256, U64};
+use alloy_rlp::Rlp;
+use alloy_rpc_types::{other::OtherFields, AccessList, AccessListItem, Transaction as EthersTx};
 use pin_project::pin_project;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
@@ -621,34 +618,31 @@ impl Client {
 }
 
 fn tx_to_proto(tx: EthersTx) -> Transaction {
-    let to = tx.to.map(|to| to.as_bytes().to_vec());
+    let to = tx.to.map(|to| to.to_vec());
 
     let tx_type = match tx.transaction_type {
-        Some(tp) => tp.as_u64(),
-        None => 0,
+        Some(tp) => tp.to_u64(),
+        None => 0u64,
     };
 
-    let mut val_bytes = [0; 32];
-    tx.value.to_big_endian(&mut val_bytes);
+    let val_bytes = tx.value.to_be_bytes::<32>();
 
-    let mut r_bytes = [0; 32];
-    tx.r.to_big_endian(&mut r_bytes);
+    let r_bytes = tx.signature.as_ref().map(|sig| sig.r.to_be_bytes::<32>());
 
-    let mut s_bytes = [0; 32];
-    tx.s.to_big_endian(&mut s_bytes);
+    let s_bytes = tx.signature.as_ref().map(|sig| sig.s.to_be_bytes::<32>());
 
     let acl = match tx.access_list {
         Some(acl) => {
             let mut new_acl: Vec<eth::AccessTuple> = Vec::new();
-            for tup in acl.0 {
+            for tup in acl {
                 let mut new_keys: Vec<Vec<u8>> = Vec::new();
 
                 for key in tup.storage_keys {
-                    new_keys.push(key.as_bytes().to_vec())
+                    new_keys.push(key.to_vec())
                 }
 
                 new_acl.push(eth::AccessTuple {
-                    address: tup.address.as_bytes().to_vec(),
+                    address: tup.address.to_vec(),
                     storage_keys: new_keys,
                 });
             }
@@ -661,43 +655,35 @@ fn tx_to_proto(tx: EthersTx) -> Transaction {
     Transaction {
         to,
         gas: tx.gas.as_u64(),
-        gas_price: tx.gas_price.unwrap_or(ethers::types::U256::zero()).as_u64(),
-        hash: tx.hash.as_bytes().to_vec(),
+        gas_price: tx.gas_price.unwrap_or(U128::ZERO).as_u64(),
+        hash: tx.hash.to_vec(),
         input: tx.input.to_vec(),
         nonce: tx.nonce.as_u64(),
         value: val_bytes.to_vec(),
-        from: Some(tx.from.as_bytes().to_vec()),
+        from: Some(tx.from.to_vec()),
         r#type: tx_type as u32,
-        max_fee: tx
-            .max_fee_per_gas
-            .unwrap_or(ethers::types::U256::zero())
-            .as_u64(),
-        priority_fee: tx
-            .max_priority_fee_per_gas
-            .unwrap_or(ethers::types::U256::zero())
-            .as_u64(),
-        v: tx.v.as_u64(),
-        r: r_bytes.to_vec(),
-        s: s_bytes.to_vec(),
-        chain_id: tx.chain_id.unwrap_or(ethers::types::U256::zero()).as_u32(),
+        max_fee: tx.max_fee_per_gas.unwrap_or(U128::ZERO).as_u64(),
+        priority_fee: tx.max_priority_fee_per_gas.unwrap_or(U128::ZERO).as_u64(),
+        v: tx.signature.as_ref().map(|sig| sig.v.as_u64()).unwrap_or(0),
+        r: r_bytes.unwrap_or(U256::ZERO.to_be_bytes()).to_vec(),
+        s: s_bytes.unwrap_or(U256::ZERO.to_be_bytes()).to_vec(),
+        chain_id: tx.chain_id.unwrap_or(U64::ZERO).as_u32(),
         access_list: acl,
     }
 }
 
 fn proto_to_tx(proto: Transaction) -> EthersTx {
-    let to = proto
-        .to
-        .map(|to| ethers::types::H160::from_slice(to.as_slice()));
+    let to = proto.to.map(|to| Address::from_slice(to.as_slice()));
 
-    let tx_type: Option<ethers::types::U64> = match proto.r#type {
+    let tx_type: Option<U64> = match proto.r#type {
         1 => Some(1.into()),
         2 => Some(2.into()),
         _ => None,
     };
     let val = if proto.value.is_empty() {
-        ethers::types::U256::zero()
+        U256::ZERO
     } else {
-        ethers::types::U256::decode(&Rlp::new(&proto.value)).unwrap()
+        U256::decode(&Rlp::new(&proto.value)).unwrap()
     };
 
     let r = ethers::types::U256::from_big_endian(proto.r.as_slice());
@@ -783,7 +769,6 @@ fn proto_to_tx(proto: Transaction) -> EthersTx {
 
 #[cfg(test)]
 mod tests {
-    use ethers::utils::rlp::{Decodable, Rlp};
 
     use super::*;
 
