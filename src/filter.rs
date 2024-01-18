@@ -1,4 +1,4 @@
-use ethers::types::{Address, Bytes, U256};
+use ethers_core::types::{Address, Bytes, U256};
 use hex;
 use serde::Serialize;
 use serde_repr::Serialize_repr;

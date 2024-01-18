@@ -1,9 +1,9 @@
 use std::time::Duration;
 
-use ethers::{
+use ethers_core::{
     types::{
         transaction::eip2930::{AccessList, AccessListItem},
-        OtherFields, Transaction as EthersTx, U256,
+        OtherFields, Transaction as EthersTx, H160, H256, U256, U64,
     },
     utils::rlp::{Decodable, Rlp},
 };
@@ -661,47 +661,39 @@ fn tx_to_proto(tx: EthersTx) -> Transaction {
     Transaction {
         to,
         gas: tx.gas.as_u64(),
-        gas_price: tx.gas_price.unwrap_or(ethers::types::U256::zero()).as_u64(),
+        gas_price: tx.gas_price.unwrap_or(U256::zero()).as_u64(),
         hash: tx.hash.as_bytes().to_vec(),
         input: tx.input.to_vec(),
         nonce: tx.nonce.as_u64(),
         value: val_bytes.to_vec(),
         from: Some(tx.from.as_bytes().to_vec()),
         r#type: tx_type as u32,
-        max_fee: tx
-            .max_fee_per_gas
-            .unwrap_or(ethers::types::U256::zero())
-            .as_u64(),
-        priority_fee: tx
-            .max_priority_fee_per_gas
-            .unwrap_or(ethers::types::U256::zero())
-            .as_u64(),
+        max_fee: tx.max_fee_per_gas.unwrap_or(U256::zero()).as_u64(),
+        priority_fee: tx.max_priority_fee_per_gas.unwrap_or(U256::zero()).as_u64(),
         v: tx.v.as_u64(),
         r: r_bytes.to_vec(),
         s: s_bytes.to_vec(),
-        chain_id: tx.chain_id.unwrap_or(ethers::types::U256::zero()).as_u32(),
+        chain_id: tx.chain_id.unwrap_or(U256::zero()).as_u32(),
         access_list: acl,
     }
 }
 
 fn proto_to_tx(proto: Transaction) -> EthersTx {
-    let to = proto
-        .to
-        .map(|to| ethers::types::H160::from_slice(to.as_slice()));
+    let to = proto.to.map(|to| H160::from_slice(to.as_slice()));
 
-    let tx_type: Option<ethers::types::U64> = match proto.r#type {
+    let tx_type: Option<U64> = match proto.r#type {
         1 => Some(1.into()),
         2 => Some(2.into()),
         _ => None,
     };
     let val = if proto.value.is_empty() {
-        ethers::types::U256::zero()
+        U256::zero()
     } else {
-        ethers::types::U256::decode(&Rlp::new(&proto.value)).unwrap()
+        U256::decode(&Rlp::new(&proto.value)).unwrap()
     };
 
-    let r = ethers::types::U256::from_big_endian(proto.r.as_slice());
-    let s = ethers::types::U256::from_big_endian(proto.s.as_slice());
+    let r = U256::from_big_endian(proto.r.as_slice());
+    let s = U256::from_big_endian(proto.s.as_slice());
 
     let gas_price: Option<U256> = if proto.gas_price == 0 {
         None
@@ -724,19 +716,19 @@ fn proto_to_tx(proto: Transaction) -> EthersTx {
         let mut new_acl: Vec<AccessListItem> = Vec::new();
 
         for tup in proto.access_list {
-            let mut keys: Vec<ethers::types::H256> = Vec::new();
+            let mut keys: Vec<H256> = Vec::new();
 
             for key in tup.storage_keys {
-                keys.push(ethers::types::H256::from_slice(key.as_slice()))
+                keys.push(H256::from_slice(key.as_slice()))
             }
 
             new_acl.push(AccessListItem {
-                address: ethers::types::H160::from_slice(tup.address.as_slice()),
+                address: H160::from_slice(tup.address.as_slice()),
                 storage_keys: keys,
             });
         }
 
-        acl = Some(ethers::types::transaction::eip2930::AccessList(new_acl));
+        acl = Some(AccessList(new_acl));
     }
 
     let v = if tx_type.is_some() {
@@ -758,12 +750,12 @@ fn proto_to_tx(proto: Transaction) -> EthersTx {
     }
 
     EthersTx {
-        hash: ethers::types::H256::from_slice(proto.hash.as_slice()),
+        hash: H256::from_slice(proto.hash.as_slice()),
         nonce: proto.nonce.into(),
         block_hash: None,
         block_number: None,
         transaction_index: None,
-        from: ethers::types::H160::from_slice(proto.from.unwrap_or_default().as_slice()),
+        from: H160::from_slice(proto.from.unwrap_or_default().as_slice()),
         to,
         value: val,
         gas_price,
@@ -783,7 +775,6 @@ fn proto_to_tx(proto: Transaction) -> EthersTx {
 
 #[cfg(test)]
 mod tests {
-    use ethers::utils::rlp::{Decodable, Rlp};
 
     use super::*;
 
