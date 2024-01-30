@@ -264,6 +264,26 @@ pub struct Client {
     cmd_tx: mpsc::UnboundedSender<SendType>,
 }
 
+#[derive(Debug, Default)]
+pub struct ClientOptions {
+    send_compressed: bool,
+    accept_compressed: bool,
+}
+
+impl ClientOptions {
+    /// Enables GZIP compression for outgoing data.
+    pub fn send_compressed(mut self, send_compressed: bool) -> Self {
+        self.send_compressed = send_compressed;
+        self
+    }
+
+    /// Enables GZIP compression for incoming data.
+    pub fn accept_compressed(mut self, accept_compressed: bool) -> Self {
+        self.accept_compressed = accept_compressed;
+        self
+    }
+}
+
 /// Appends the api key metadata to the request, keyed by x-api-key.
 fn append_api_key<T>(req: &mut Request<T>, key: &str) {
     req.metadata_mut().append("x-api-key", key.parse().unwrap());
@@ -272,9 +292,20 @@ fn append_api_key<T>(req: &mut Request<T>, key: &str) {
 impl Client {
     /// Connects to the given gRPC target with the API key, returning a [`Client`] instance.
     pub async fn connect(
-        target: String,
-        api_key: String,
+        target: impl Into<String>,
+        api_key: impl Into<String>,
     ) -> Result<Client, Box<dyn std::error::Error>> {
+        Self::connect_with_options(target, api_key, ClientOptions::default()).await
+    }
+
+    pub async fn connect_with_options(
+        target: impl Into<String>,
+        api_key: impl Into<String>,
+        opts: ClientOptions,
+    ) -> Result<Client, Box<dyn std::error::Error>> {
+        let target = target.into();
+        let api_key = api_key.into();
+
         let targetstr = if !target.starts_with("http://") {
             "http://".to_owned() + &target
         } else {
@@ -282,10 +313,15 @@ impl Client {
         };
 
         // Set up the inner gRPC connection
-        let client = ApiClient::connect(targetstr.to_owned())
-            .await?
-            .send_compressed(CompressionEncoding::Gzip)
-            .accept_compressed(CompressionEncoding::Gzip);
+        let mut client = ApiClient::connect(targetstr.to_owned()).await?;
+
+        if opts.accept_compressed {
+            client = client.accept_compressed(CompressionEncoding::Gzip);
+        }
+
+        if opts.send_compressed {
+            client = client.send_compressed(CompressionEncoding::Gzip);
+        }
 
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
 
