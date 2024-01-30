@@ -32,6 +32,10 @@ async fn main() {
 }
 ```
 
+### Performance & Compression
+With `ClientOptions` you can negotiate incoming and outgoing stream compression. This activates gzip compression on the underlying gRPC connections. Compression is not always faster, and here are some general guidelines to follow:
+- If your client is close to the target Fiber node and you have enough bandwidth, it's best to disable `accept` compression.
+- If you client is far from the target Fiber node and you have limited bandwidth, it's best to enable `accept` compression.
 
 ### Subscriptions
 All subscriptions return a `Stream` (`UnboundedReceiverStream`) of the specified type.
