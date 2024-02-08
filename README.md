@@ -10,6 +10,8 @@ cargo add fiber --git https://github.com/chainbound/fiber-rs
 `fiber-rs` prints traces to the `fiber` target. To see them, run your program with `RUST_LOG=fiber=info`.
 
 ### Connecting
+
+Using default options:
 ```rs
 use fiber::Client;
 
@@ -18,6 +20,22 @@ async fn main() {
     let mut client = Client::connect("ENDPOINT_URL", "API_KEY").await.unwrap();
 }
 ```
+
+Specifying options:
+```rs
+use fiber::{Client, ClientOptions};
+
+#[tokio::main]
+async fn main() {
+    let opts = ClientOptions::default().send_compressed(true);
+    let mut client = Client::connect_with_options("ENDPOINT_URL", "API_KEY", opts).await.unwrap();
+}
+```
+
+### Performance & Compression
+With `ClientOptions` you can negotiate incoming and outgoing stream compression. This activates gzip compression on the underlying gRPC connections. Compression is not always faster, and here are some general guidelines to follow:
+- If your client is close to the target Fiber node and you have enough bandwidth, it's best to disable `accept` compression.
+- If you client is far from the target Fiber node and you have limited bandwidth, it's best to enable `accept` compression.
 
 ### Subscriptions
 All subscriptions return a `Stream` (`UnboundedReceiverStream`) of the specified type.
@@ -35,7 +53,7 @@ use tokio_stream::StreamExt;
 #[tokio::main]
 async fn main() {
     // Client needs to be mutable
-    let mut client = Client::connect("ENDPOINT_URL".to_string(), "API_KEY".to_string()).await.unwrap();
+    let mut client = Client::connect("ENDPOINT_URL", "API_KEY").await.unwrap();
 
     // No filter in this example
     let mut sub = client.subscribe_new_txs(None).await;
@@ -58,13 +76,13 @@ use tokio_stream::StreamExt;
 #[tokio::main]
 async fn main() {
     // Client needs to be mutable
-    let mut client = Client::connect("ENDPOINT_URL".to_string(), "API_KEY".to_string()).await.unwrap();
+    let mut client = Client::connect("ENDPOINT_URL", "API_KEY").await.unwrap();
 
     // Construct filter
     // example 1: simple receiver filter
     let f = FilterBuilder::new()
                 .to("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D");
-    
+
     // example 2: all transactions with either of these addresses as the receiver
     let f = FilterBuilder::new()
                 .or() // creates a new 'OR' level
@@ -91,7 +109,7 @@ async fn main() {
 
 #### Execution Payloads (new block headers + transactions)
 Returns a stream of newly seen execution payloads. This is useful for getting the state updates of a
-newly confirmed block. An `ExecutionPayload` contains both the block header and the transactions 
+newly confirmed block. An `ExecutionPayload` contains both the block header and the transactions
 that were executed in that block.
 
 **Example:**
@@ -102,7 +120,7 @@ use tokio_stream::StreamExt;
 #[tokio::main]
 async fn main() {
     // Client needs to be mutable
-    let mut client = Client::connect("ENDPOINT_URL".to_string(), "API_KEY".to_string()).await.unwrap();
+    let mut client = Client::connect("ENDPOINT_URL", "API_KEY").await.unwrap();
 
     // No filter in this example
     let mut sub = client.subscribe_new_execution_payloads().await;
@@ -126,7 +144,7 @@ use tokio_stream::StreamExt;
 #[tokio::main]
 async fn main() {
     // Client needs to be mutable
-    let mut client = Client::connect("ENDPOINT_URL".to_string(), "API_KEY".to_string()).await.unwrap();
+    let mut client = Client::connect("ENDPOINT_URL", "API_KEY").await.unwrap();
 
     // No filter in this example
     let mut sub = client.subscribe_new_execution_headers().await;
@@ -139,7 +157,7 @@ async fn main() {
 ```
 
 #### Beacon Blocks
-Returns a stream of consensus-layer [`BeaconBlock`](https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#beaconblock) objects. NOTE: the `ExecutionPayload` is not included in this stream, please use the `subscribe_new_execution_payloads` stream if you need it. 
+Returns a stream of consensus-layer [`BeaconBlock`](https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#beaconblock) objects. NOTE: the `ExecutionPayload` is not included in this stream, please use the `subscribe_new_execution_payloads` stream if you need it.
 
 **Example:**
 ```rs
@@ -149,7 +167,7 @@ use tokio_stream::StreamExt;
 #[tokio::main]
 async fn main() {
     // Client needs to be mutable
-    let mut client = Client::connect("ENDPOINT_URL".to_string(), "API_KEY".to_string()).await.unwrap();
+    let mut client = Client::connect("ENDPOINT_URL", "API_KEY").await.unwrap();
 
     // No filter in this example
     let mut sub = client.subscribe_new_beacon_blocks().await;
@@ -173,7 +191,7 @@ use fiber::Client;
 
 #[tokio::main]
 asyn fn main() {
-    let mut client = Client::connect("ENDPOINT_URL".to_string(), "API_KEY".to_string()).await.unwrap();
+    let mut client = Client::connect("ENDPOINT_URL", "API_KEY").await.unwrap();
 
     let tx: TypedTransaction = TransactionRequest::new()
         .nonce(3)
@@ -208,7 +226,7 @@ use fiber::Client;
 
 #[tokio::main]
 asyn fn main() {
-    let mut client = Client::connect("ENDPOINT_URL".to_string(), "API_KEY".to_string()).await.unwrap();
+    let mut client = Client::connect("ENDPOINT_URL", "API_KEY").await.unwrap();
 
     let tx: TypedTransaction = TransactionRequest::new()
         .nonce(3)
