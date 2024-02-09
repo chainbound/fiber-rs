@@ -4,11 +4,10 @@ use ethereum_consensus::{
     ssz::prelude::deserialize,
     types::mainnet::{ExecutionPayload, ExecutionPayloadHeader, SignedBeaconBlock},
 };
-use pin_project::pin_project;
 use reth_primitives::{Address, TransactionSigned, TransactionSignedEcRecovered};
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
-use tonic::{codec::CompressionEncoding, transport::Channel, Request, Streaming};
+use tonic::{codec::CompressionEncoding, transport::Channel, Request};
 
 pub mod api;
 pub mod filter;
@@ -20,12 +19,6 @@ use api::{
 };
 
 use crate::api::TransactionMsg;
-
-#[pin_project]
-pub struct TxStream {
-    #[pin]
-    stream: Streaming<TransactionSignedEcRecovered>,
-}
 
 #[allow(clippy::large_enum_variant)]
 pub enum SendType {
