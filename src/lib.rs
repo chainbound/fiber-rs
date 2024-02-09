@@ -7,10 +7,9 @@ use ethers_core::{
     },
     utils::rlp::{Decodable, Rlp},
 };
-use pin_project::pin_project;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
-use tonic::{codec::CompressionEncoding, transport::Channel, Request, Streaming};
+use tonic::{codec::CompressionEncoding, transport::Channel, Request};
 
 pub mod api;
 pub mod eth;
@@ -22,19 +21,6 @@ use api::{
     TransactionResponse, TxFilter, TxSequenceMsg, TxSequenceResponse,
 };
 use eth::{CompactBeaconBlock, ExecutionPayload, ExecutionPayloadHeader, Transaction};
-
-#[pin_project]
-pub struct TxStream {
-    #[pin]
-    stream: Streaming<Transaction>,
-}
-
-impl TxStream {
-    pub async fn next(&mut self) -> Option<EthersTx> {
-        let proto = self.stream.message().await.unwrap_or(None)?;
-        Some(proto_to_tx(proto))
-    }
-}
 
 #[allow(clippy::large_enum_variant)]
 pub enum SendType {
@@ -497,7 +483,9 @@ impl Client {
                 while let Some(item) = stream.next().await {
                     match item {
                         Ok(transaction) => {
-                            let _ = tx.send(proto_to_tx(transaction));
+                            if let Some(transaction) = proto_to_tx(transaction) {
+                                let _ = tx.send(transaction);
+                            }
                         }
                         Err(e) => {
                             tracing::error!(error = ?e, "Error in transaction stream, retrying...");
@@ -714,8 +702,16 @@ fn tx_to_proto(tx: EthersTx) -> Transaction {
     }
 }
 
-fn proto_to_tx(proto: Transaction) -> EthersTx {
-    let to = proto.to.map(|to| H160::from_slice(to.as_slice()));
+fn proto_to_tx(proto: Transaction) -> Option<EthersTx> {
+    let to = if let Some(to) = proto.to {
+        if to.is_empty() {
+            None
+        } else {
+            Some(H160::from_slice(&to))
+        }
+    } else {
+        None
+    };
 
     let tx_type: Option<U64> = match proto.r#type {
         1 => Some(1.into()),
@@ -758,8 +754,16 @@ fn proto_to_tx(proto: Transaction) -> EthersTx {
                 keys.push(H256::from_slice(key.as_slice()))
             }
 
+            println!("{:?}", tup.address);
+
+            let address = if tup.address.is_empty() {
+                H160::zero()
+            } else {
+                H160::from_slice(tup.address.as_slice())
+            };
+
             new_acl.push(AccessListItem {
-                address: H160::from_slice(tup.address.as_slice()),
+                address,
                 storage_keys: keys,
             });
         }
@@ -785,13 +789,17 @@ fn proto_to_tx(proto: Transaction) -> EthersTx {
         chain_id = None;
     }
 
-    EthersTx {
-        hash: H256::from_slice(proto.hash.as_slice()),
+    let Some(from) = &proto.from else {
+        return None;
+    };
+
+    Some(EthersTx {
+        hash: H256::from_slice(&proto.hash),
         nonce: proto.nonce.into(),
         block_hash: None,
         block_number: None,
         transaction_index: None,
-        from: H160::from_slice(proto.from.unwrap_or_default().as_slice()),
+        from: H160::from_slice(from),
         to,
         value: val,
         gas_price,
@@ -806,7 +814,7 @@ fn proto_to_tx(proto: Transaction) -> EthersTx {
         max_fee_per_gas: max_fee,
         chain_id,
         other: OtherFields::default(),
-    }
+    })
 }
 
 #[cfg(test)]
