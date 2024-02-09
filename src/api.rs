@@ -64,13 +64,21 @@ pub struct TransactionWithSenderMsg {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ExecutionPayloadMsg {
-    #[prost(bytes = "vec", tag = "1")]
+    /// The fork data version.
+    #[prost(uint32, tag = "1")]
+    pub data_version: u32,
+    /// The SSZ encoded execution payload.
+    #[prost(bytes = "vec", tag = "2")]
     pub ssz_payload: ::prost::alloc::vec::Vec<u8>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct EmptyBeaconBlockMsg {
-    #[prost(bytes = "vec", tag = "1")]
+pub struct BeaconBlockMsg {
+    /// The beacon block version.
+    #[prost(uint32, tag = "1")]
+    pub data_version: u32,
+    /// The SSZ encoded beacon block.
+    #[prost(bytes = "vec", tag = "2")]
     pub ssz_block: ::prost::alloc::vec::Vec<u8>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -278,12 +286,12 @@ pub mod api_client {
                 .insert(GrpcMethod::new("api.API", "SubscribeExecutionPayloadsV2"));
             self.inner.server_streaming(req, path, codec).await
         }
-        /// Opens a stream of new empty beacon blocks. These beacon blocks contain everything except list of transactions.
-        pub async fn subscribe_empty_beacon_blocks(
+        /// Opens a stream of new beacon blocks.
+        pub async fn subscribe_beacon_blocks_v2(
             &mut self,
             request: impl tonic::IntoRequest<()>,
         ) -> std::result::Result<
-            tonic::Response<tonic::codec::Streaming<super::EmptyBeaconBlockMsg>>,
+            tonic::Response<tonic::codec::Streaming<super::BeaconBlockMsg>>,
             tonic::Status,
         > {
             self.inner.ready().await.map_err(|e| {
@@ -293,10 +301,10 @@ pub mod api_client {
                 )
             })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static("/api.API/SubscribeEmptyBeaconBlocks");
+            let path = http::uri::PathAndQuery::from_static("/api.API/SubscribeBeaconBlocksV2");
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("api.API", "SubscribeEmptyBeaconBlocks"));
+                .insert(GrpcMethod::new("api.API", "SubscribeBeaconBlocksV2"));
             self.inner.server_streaming(req, path, codec).await
         }
         /// Opens a bi-directional stream for new block submissions. The client stream is used to send

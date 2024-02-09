@@ -1,11 +1,15 @@
 [package]
 name = "fiber"
-version = "0.5.1"
+version = "0.6.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+alloy-rpc-engine-types = { git = "https://github.com/alloy-rs/alloy", features = [
+  "ssz",
+] }
+ethereum_ssz = "0.5.3"
 async-stream = "0.3"
 base64 = "0.13.1"
 ethereum-consensus = { git = "https://github.com/ralexstokes/ethereum-consensus" }
