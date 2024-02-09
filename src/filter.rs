@@ -1,5 +1,5 @@
-use ethers_core::types::{Address, Bytes, U256};
 use hex;
+use reth_primitives::{Address, Bytes, U256};
 use serde::Serialize;
 use serde_repr::Serialize_repr;
 use std::{cell::RefCell, rc::Rc};
@@ -70,7 +70,7 @@ impl FilterBuilder {
         let new = Rc::new(RefCell::new(Node {
             operand: Some(FilterKV {
                 key: String::from("to"),
-                value: addr.as_bytes().to_vec(),
+                value: addr.to_vec(),
             }),
             operator: None,
             children: None,
@@ -104,7 +104,7 @@ impl FilterBuilder {
         let new = Rc::new(RefCell::new(Node {
             operand: Some(FilterKV {
                 key: String::from("from"),
-                value: addr.as_bytes().to_vec(),
+                value: addr.to_vec(),
             }),
             operator: None,
             children: None,

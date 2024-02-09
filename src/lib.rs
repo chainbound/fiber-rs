@@ -1,57 +1,40 @@
 use std::time::Duration;
 
-use ethers_core::{
-    types::{
-        transaction::eip2930::{AccessList, AccessListItem},
-        OtherFields, Transaction as EthersTx, H160, H256, U256, U64,
-    },
-    utils::rlp::{Decodable, Rlp},
+use ethereum_consensus::{
+    ssz::prelude::deserialize,
+    types::mainnet::{ExecutionPayload, ExecutionPayloadHeader, SignedBeaconBlock},
 };
 use pin_project::pin_project;
+use reth_primitives::{Address, TransactionSigned, TransactionSignedEcRecovered};
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
 use tonic::{codec::CompressionEncoding, transport::Channel, Request, Streaming};
 
 pub mod api;
-pub mod eth;
 pub mod filter;
 pub mod types;
 
 use api::{
-    api_client::ApiClient, BlockSubmissionMsg, BlockSubmissionResponse, RawTxMsg, RawTxSequenceMsg,
-    TransactionResponse, TxFilter, TxSequenceMsg, TxSequenceResponse,
+    api_client::ApiClient, BlockSubmissionMsg, BlockSubmissionResponse, TransactionResponse,
+    TxFilter, TxSequenceMsgV2, TxSequenceResponse,
 };
-use eth::{CompactBeaconBlock, ExecutionPayload, ExecutionPayloadHeader, Transaction};
+
+use crate::api::TransactionMsg;
 
 #[pin_project]
 pub struct TxStream {
     #[pin]
-    stream: Streaming<Transaction>,
-}
-
-impl TxStream {
-    pub async fn next(&mut self) -> Option<EthersTx> {
-        let proto = self.stream.message().await.unwrap_or(None)?;
-        Some(proto_to_tx(proto))
-    }
+    stream: Streaming<TransactionSignedEcRecovered>,
 }
 
 #[allow(clippy::large_enum_variant)]
 pub enum SendType {
     Transaction {
-        tx: Transaction,
-        response: oneshot::Sender<TransactionResponse>,
-    },
-    RawTransaction {
-        msg: RawTxMsg,
+        tx: TransactionSigned,
         response: oneshot::Sender<TransactionResponse>,
     },
     TransactionSequence {
-        msg: TxSequenceMsg,
-        response: oneshot::Sender<TxSequenceResponse>,
-    },
-    RawTransactionSequence {
-        msg: RawTxSequenceMsg,
+        msg: TxSequenceMsgV2,
         response: oneshot::Sender<TxSequenceResponse>,
     },
     Block {
@@ -60,6 +43,7 @@ pub enum SendType {
     },
 }
 
+/// The dispatcher is responsible of handling request / response messages (like sending transactions)
 struct Dispatcher {
     cmd_rx: mpsc::UnboundedReceiver<SendType>,
     client: ApiClient<Channel>,
@@ -80,26 +64,10 @@ impl Dispatcher {
             // Append the api key metadata
             append_api_key(&mut req, &api_key);
 
-            let mut new_tx_responses = match client.send_transaction(req).await {
+            let mut new_tx_responses = match client.send_transaction_v2(req).await {
                 Ok(stream) => stream.into_inner(),
                 Err(e) => {
                     tracing::error!(error = ?e, "Error in transaction stream, retrying...");
-                    tokio::time::sleep(Duration::from_secs(1)).await;
-                    continue;
-                }
-            };
-
-            let (new_raw_tx_sender, rx) = mpsc::unbounded_channel();
-            let rx_stream = UnboundedReceiverStream::new(rx);
-
-            let mut req = Request::new(rx_stream);
-            // Append the api key metadata
-            append_api_key(&mut req, &api_key);
-
-            let mut new_raw_tx_responses = match client.send_raw_transaction(req).await {
-                Ok(stream) => stream.into_inner(),
-                Err(e) => {
-                    tracing::error!(error = ?e, "Error in raw transaction stream, retrying...");
                     tokio::time::sleep(Duration::from_secs(1)).await;
                     continue;
                 }
@@ -112,27 +80,10 @@ impl Dispatcher {
             // Append the api key metadata
             append_api_key(&mut req, &api_key);
 
-            let mut new_tx_seq_responses = match client.send_transaction_sequence(req).await {
+            let mut new_tx_seq_responses = match client.send_transaction_sequence_v2(req).await {
                 Ok(stream) => stream.into_inner(),
                 Err(e) => {
                     tracing::error!(error = ?e, "Error in transaction sequence stream, retrying...");
-                    tokio::time::sleep(Duration::from_secs(1)).await;
-                    continue;
-                }
-            };
-
-            let (new_raw_tx_seq_sender, rx) = mpsc::unbounded_channel();
-            let rx_stream = UnboundedReceiverStream::new(rx);
-
-            let mut req = Request::new(rx_stream);
-            // Append the api key metadata
-            append_api_key(&mut req, &api_key);
-
-            let mut new_raw_tx_seq_responses = match client.send_raw_transaction_sequence(req).await
-            {
-                Ok(stream) => stream.into_inner(),
-                Err(e) => {
-                    tracing::error!(error = ?e, "Error in raw transaction sequence stream, retrying...");
                     tokio::time::sleep(Duration::from_secs(1)).await;
                     continue;
                 }
@@ -158,30 +109,18 @@ impl Dispatcher {
             while let Some(cmd) = self.cmd_rx.recv().await {
                 match cmd {
                     SendType::Transaction { tx, response } => {
-                        if new_tx_sender.send(tx).is_err() {
+                        let mut rlp_transaction: Vec<u8> = Vec::new();
+                        tx.encode_enveloped(&mut rlp_transaction);
+
+                        if new_tx_sender
+                            .send(TransactionMsg { rlp_transaction })
+                            .is_err()
+                        {
                             tracing::error!("Failed sending transaction");
                             break;
                         }
 
                         if let Some(res) = new_tx_responses.next().await {
-                            match res {
-                                Ok(res) => {
-                                    let _ = response.send(res);
-                                }
-                                Err(e) => {
-                                    tracing::error!(error = ?e, "Error in response stream, retrying...");
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    SendType::RawTransaction { msg, response } => {
-                        if new_raw_tx_sender.send(msg).is_err() {
-                            tracing::error!("Failed sending raw transaction");
-                            break;
-                        }
-
-                        if let Some(res) = new_raw_tx_responses.next().await {
                             match res {
                                 Ok(res) => {
                                     let _ = response.send(res);
@@ -200,24 +139,6 @@ impl Dispatcher {
                         }
 
                         if let Some(res) = new_tx_seq_responses.next().await {
-                            match res {
-                                Ok(res) => {
-                                    let _ = response.send(res);
-                                }
-                                Err(e) => {
-                                    tracing::error!(error = ?e, "Error in response stream, retrying...");
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    SendType::RawTransactionSequence { msg, response } => {
-                        if new_raw_tx_seq_sender.send(msg).is_err() {
-                            tracing::error!("Failed sending raw transaction sequence");
-                            break;
-                        }
-
-                        if let Some(res) = new_raw_tx_seq_responses.next().await {
                             match res {
                                 Ok(res) => {
                                     let _ = response.send(res);
@@ -325,7 +246,6 @@ impl Client {
 
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
 
-        // The dispatcher will handle request / response messages (like sending transactions)
         let dispatcher = Dispatcher {
             cmd_rx,
             api_key: api_key.clone(),
@@ -347,32 +267,13 @@ impl Client {
     /// of when the first node received the transaction.
     pub async fn send_transaction(
         &self,
-        tx: EthersTx,
+        tx: TransactionSigned,
     ) -> Result<(String, i64), Box<dyn std::error::Error>> {
         let (res, rx) = oneshot::channel();
 
-        let _ = self.cmd_tx.send(SendType::Transaction {
-            tx: tx_to_proto(tx),
-            response: res,
-        });
-
-        let res = rx.await?;
-
-        Ok((res.hash.to_owned(), res.timestamp))
-    }
-
-    /// Broadcasts a signed, RLP encoded transaction to the Fiber Network. Returns hash and the timestamp
-    /// of when the first node received the transaction.
-    pub async fn send_raw_transaction(
-        &self,
-        raw_tx: Vec<u8>,
-    ) -> Result<(String, i64), Box<dyn std::error::Error>> {
-        let (res, rx) = oneshot::channel();
-
-        let _ = self.cmd_tx.send(SendType::RawTransaction {
-            msg: RawTxMsg { raw_tx },
-            response: res,
-        });
+        let _ = self
+            .cmd_tx
+            .send(SendType::Transaction { tx, response: res });
 
         let res = rx.await?;
 
@@ -383,47 +284,21 @@ impl Client {
     /// the timestamp of when the first node received the sequence.
     pub async fn send_transaction_sequence(
         &self,
-        tx_sequence: Vec<EthersTx>,
+        tx_sequence: Vec<TransactionSigned>,
     ) -> Result<(Vec<String>, i64), Box<dyn std::error::Error>> {
-        let mut proto_txs = Vec::with_capacity(tx_sequence.len());
-
-        for tx in tx_sequence {
-            proto_txs.push(tx_to_proto(tx));
-        }
-
         let (res, rx) = oneshot::channel();
 
-        let _ = self.cmd_tx.send(SendType::TransactionSequence {
-            msg: TxSequenceMsg {
-                sequence: proto_txs,
-            },
-            response: res,
-        });
-
-        let res = rx.await?;
-
-        let timestamp = res.sequence_response[0].timestamp;
-        let hashes = res
-            .sequence_response
-            .into_iter()
-            .map(|resp| resp.hash)
+        let sequence: Vec<Vec<u8>> = tx_sequence
+            .iter()
+            .map(|tx| {
+                let mut buf = Vec::new();
+                tx.encode_enveloped(&mut buf);
+                buf
+            })
             .collect();
 
-        Ok((hashes, timestamp))
-    }
-
-    /// Broadcasts a signed, RLP encoded transaction sequence to the Fiber Network. Returns the array of hashes and
-    /// the timestamp of when the first node received the sequence.
-    pub async fn send_raw_transaction_sequence(
-        &self,
-        raw_tx_sequence: Vec<Vec<u8>>,
-    ) -> Result<(Vec<String>, i64), Box<dyn std::error::Error>> {
-        let (res, rx) = oneshot::channel();
-
-        let _ = self.cmd_tx.send(SendType::RawTransactionSequence {
-            msg: RawTxSequenceMsg {
-                raw_txs: raw_tx_sequence,
-            },
+        let _ = self.cmd_tx.send(SendType::TransactionSequence {
+            msg: TxSequenceMsgV2 { sequence },
             response: res,
         });
 
@@ -455,13 +330,13 @@ impl Client {
         Ok(rx.await?)
     }
 
-    /// Subscribes to new transactions, returning an [`UnboundedReceiverStream`] of [`EthersTx`].
+    /// Subscribes to new transactions, returning an [`UnboundedReceiverStream`] of [`RethTx`].
     /// Uses the given encoded filter to filter transactions. Note: the actual subscription takes place in
     /// the background. It will automatically retry every 2s if the stream fails.
     pub async fn subscribe_new_txs(
         &self,
         filter: Option<Vec<u8>>,
-    ) -> UnboundedReceiverStream<EthersTx> {
+    ) -> UnboundedReceiverStream<TransactionSignedEcRecovered> {
         let f = match filter {
             Some(encoded_filter) => TxFilter {
                 encoded: encoded_filter,
@@ -483,7 +358,7 @@ impl Client {
                 let mut req = Request::new(f.clone());
                 append_api_key(&mut req, &key);
 
-                let mut stream = match client.subscribe_new_txs(req).await {
+                let mut stream = match client.subscribe_new_txs_v2(req).await {
                     Ok(stream) => stream.into_inner(),
                     Err(e) => {
                         tracing::error!(error = ?e, "Error in transaction stream, retrying...");
@@ -497,7 +372,27 @@ impl Client {
                 while let Some(item) = stream.next().await {
                     match item {
                         Ok(transaction) => {
-                            let _ = tx.send(proto_to_tx(transaction));
+                            // let transaction_encoded = Vec::new();
+                            let signer = match Address::try_from(transaction.sender.as_slice()) {
+                                Ok(sender) => sender,
+                                Err(e) => {
+                                    tracing::error!(error = ?e, "Error deserializing sender");
+                                    continue;
+                                }
+                            };
+                            let signed_transaction = match TransactionSigned::decode_enveloped(
+                                &mut transaction.rlp_transaction.as_slice(),
+                            ) {
+                                Ok(tx) => tx,
+                                Err(e) => {
+                                    tracing::error!(error = ?e, "Error deserializing transaction");
+                                    continue;
+                                }
+                            };
+                            let _ = tx.send(TransactionSignedEcRecovered::from_signed_transaction(
+                                signed_transaction,
+                                signer,
+                            ));
                         }
                         Err(e) => {
                             tracing::error!(error = ?e, "Error in transaction stream, retrying...");
@@ -532,7 +427,7 @@ impl Client {
                 let mut req = Request::new(());
                 append_api_key(&mut req, &key);
 
-                let mut stream = match client.subscribe_execution_headers(req).await {
+                let mut stream = match client.subscribe_execution_payloads_v2(req).await {
                     Ok(stream) => stream.into_inner(),
                     Err(e) => {
                         tracing::error!(error = ?e, "Error in execution header stream, retrying...");
@@ -546,7 +441,15 @@ impl Client {
                 while let Some(item) = stream.next().await {
                     match item {
                         Ok(header) => {
-                            let _ = tx.send(header);
+                            match deserialize::<ExecutionPayloadHeader>(&header.ssz_payload) {
+                                Ok(header_deserialized) => {
+                                    let _ = tx.send(header_deserialized);
+                                }
+                                Err(e) => {
+                                    tracing::error!(error = ?e, "Error deserializing execution header");
+                                    continue;
+                                }
+                            }
                         }
                         Err(e) => {
                             tracing::error!(error = ?e, "Error in execution header stream, retrying...");
@@ -581,7 +484,7 @@ impl Client {
                 let mut req = Request::new(());
                 append_api_key(&mut req, &key);
 
-                let mut stream = match client.subscribe_execution_payloads(req).await {
+                let mut stream = match client.subscribe_execution_payloads_v2(req).await {
                     Ok(stream) => stream.into_inner(),
                     Err(e) => {
                         tracing::error!(error = ?e, "Error in execution payload stream, retrying...");
@@ -595,7 +498,15 @@ impl Client {
                 while let Some(item) = stream.next().await {
                     match item {
                         Ok(payload) => {
-                            let _ = tx.send(payload);
+                            match deserialize::<ExecutionPayload>(&payload.ssz_payload) {
+                                Ok(payload_deserialized) => {
+                                    let _ = tx.send(payload_deserialized);
+                                }
+                                Err(e) => {
+                                    tracing::error!(error = ?e, "Error deserializing execution payload");
+                                    continue;
+                                }
+                            }
                         }
                         Err(e) => {
                             tracing::error!(error = ?e, "Error in execution payload stream, retrying...");
@@ -611,7 +522,7 @@ impl Client {
         UnboundedReceiverStream::new(rx)
     }
 
-    pub async fn subscribe_new_beacon_blocks(&self) -> UnboundedReceiverStream<CompactBeaconBlock> {
+    pub async fn subscribe_new_beacon_blocks(&self) -> UnboundedReceiverStream<SignedBeaconBlock> {
         let key = self.key.clone();
 
         let mut req = Request::new(());
@@ -625,7 +536,7 @@ impl Client {
                 let mut req = Request::new(());
                 append_api_key(&mut req, &key);
 
-                let mut stream = match client.subscribe_beacon_blocks(req).await {
+                let mut stream = match client.subscribe_empty_beacon_blocks(req).await {
                     Ok(stream) => stream.into_inner(),
                     Err(e) => {
                         tracing::error!(error = ?e, "Error in beacon block stream, retrying...");
@@ -638,9 +549,15 @@ impl Client {
 
                 while let Some(item) = stream.next().await {
                     match item {
-                        Ok(payload) => {
-                            let _ = tx.send(payload);
-                        }
+                        Ok(payload) => match deserialize::<SignedBeaconBlock>(&payload.ssz_block) {
+                            Ok(payload_deserialized) => {
+                                let _ = tx.send(payload_deserialized);
+                            }
+                            Err(e) => {
+                                tracing::error!(error = ?e, "Error deserializing beacon block");
+                                continue;
+                            }
+                        },
                         Err(e) => {
                             tracing::error!(error = ?e, "Error in beacon block stream, retrying...");
                             // If we get an error, we set the inner stream to None and break out of the loop.
@@ -653,176 +570,5 @@ impl Client {
         });
 
         UnboundedReceiverStream::new(rx)
-    }
-}
-
-fn tx_to_proto(tx: EthersTx) -> Transaction {
-    let to = tx.to.map(|to| to.as_bytes().to_vec());
-
-    let tx_type = match tx.transaction_type {
-        Some(tp) => tp.as_u64(),
-        None => 0,
-    };
-
-    let mut val_bytes = [0; 32];
-    tx.value.to_big_endian(&mut val_bytes);
-
-    let mut r_bytes = [0; 32];
-    tx.r.to_big_endian(&mut r_bytes);
-
-    let mut s_bytes = [0; 32];
-    tx.s.to_big_endian(&mut s_bytes);
-
-    let acl = match tx.access_list {
-        Some(acl) => {
-            let mut new_acl: Vec<eth::AccessTuple> = Vec::new();
-            for tup in acl.0 {
-                let mut new_keys: Vec<Vec<u8>> = Vec::new();
-
-                for key in tup.storage_keys {
-                    new_keys.push(key.as_bytes().to_vec())
-                }
-
-                new_acl.push(eth::AccessTuple {
-                    address: tup.address.as_bytes().to_vec(),
-                    storage_keys: new_keys,
-                });
-            }
-
-            new_acl
-        }
-        _ => Vec::new(),
-    };
-
-    Transaction {
-        to,
-        gas: tx.gas.as_u64(),
-        gas_price: tx.gas_price.unwrap_or(U256::zero()).as_u64(),
-        hash: tx.hash.as_bytes().to_vec(),
-        input: tx.input.to_vec(),
-        nonce: tx.nonce.as_u64(),
-        value: val_bytes.to_vec(),
-        from: Some(tx.from.as_bytes().to_vec()),
-        r#type: tx_type as u32,
-        max_fee: tx.max_fee_per_gas.unwrap_or(U256::zero()).as_u64(),
-        priority_fee: tx.max_priority_fee_per_gas.unwrap_or(U256::zero()).as_u64(),
-        v: tx.v.as_u64(),
-        r: r_bytes.to_vec(),
-        s: s_bytes.to_vec(),
-        chain_id: tx.chain_id.unwrap_or(U256::zero()).as_u32(),
-        access_list: acl,
-    }
-}
-
-fn proto_to_tx(proto: Transaction) -> EthersTx {
-    let to = proto.to.map(|to| H160::from_slice(to.as_slice()));
-
-    let tx_type: Option<U64> = match proto.r#type {
-        1 => Some(1.into()),
-        2 => Some(2.into()),
-        _ => None,
-    };
-    let val = if proto.value.is_empty() {
-        U256::zero()
-    } else {
-        U256::decode(&Rlp::new(&proto.value)).unwrap()
-    };
-
-    let r = U256::from_big_endian(proto.r.as_slice());
-    let s = U256::from_big_endian(proto.s.as_slice());
-
-    let gas_price: Option<U256> = if proto.gas_price == 0 {
-        None
-    } else {
-        Some(proto.gas_price.into())
-    };
-    let max_fee: Option<U256> = if proto.max_fee == 0 {
-        None
-    } else {
-        Some(proto.max_fee.into())
-    };
-    let priority_fee: Option<U256> = if proto.priority_fee == 0 {
-        None
-    } else {
-        Some(proto.priority_fee.into())
-    };
-
-    let mut acl: Option<AccessList> = None;
-    if !proto.access_list.is_empty() {
-        let mut new_acl: Vec<AccessListItem> = Vec::new();
-
-        for tup in proto.access_list {
-            let mut keys: Vec<H256> = Vec::new();
-
-            for key in tup.storage_keys {
-                keys.push(H256::from_slice(key.as_slice()))
-            }
-
-            new_acl.push(AccessListItem {
-                address: H160::from_slice(tup.address.as_slice()),
-                storage_keys: keys,
-            });
-        }
-
-        acl = Some(AccessList(new_acl));
-    }
-
-    let v = if tx_type.is_some() {
-        if proto.v > 1 {
-            proto.v - 37
-        } else {
-            proto.v
-        }
-    } else {
-        proto.v
-    };
-
-    let mut chain_id = Some(proto.chain_id.into());
-
-    // If transaction is legacy (no type) and its v value is 27 or 28, we set chain ID to None.
-    // This signifies a pre EIP-155 transaction.
-    if tx_type.is_none() && proto.v < 37 {
-        chain_id = None;
-    }
-
-    EthersTx {
-        hash: H256::from_slice(proto.hash.as_slice()),
-        nonce: proto.nonce.into(),
-        block_hash: None,
-        block_number: None,
-        transaction_index: None,
-        from: H160::from_slice(proto.from.unwrap_or_default().as_slice()),
-        to,
-        value: val,
-        gas_price,
-        gas: proto.gas.into(),
-        input: proto.input.into(),
-        v: v.into(),
-        r,
-        s,
-        transaction_type: tx_type,
-        access_list: acl,
-        max_priority_fee_per_gas: priority_fee,
-        max_fee_per_gas: max_fee,
-        chain_id,
-        other: OtherFields::default(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-
-    #[test]
-    fn should_convert_tx_to_proto() {
-        let signed_rlp = hex::decode("02f864010314018261a894b94f5374fce5edbc8e2a8697c15331677e6ebf0b0a825544c001a0e4663a0f2ea882cf5b38ee63b375dd116d75153d7bbcff972aee6fe0ecc920fca050917b98425bd43a3bfdc4ecd2de4424d6b2b6b5fd55d0b34fc805db58d0224b").unwrap();
-
-        let tx_rlp = Rlp::new(signed_rlp.as_slice());
-        let tx = EthersTx::decode(&tx_rlp).unwrap();
-
-        let proto = tx_to_proto(tx);
-
-        println!("proto: {:?}", proto);
     }
 }

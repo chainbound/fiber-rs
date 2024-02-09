@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 async-stream = "0.3"
 base64 = "0.13.1"
+ethereum-consensus = { git = "https://github.com/ralexstokes/ethereum-consensus" }
 hex = "0.4.3"
 pin-project = "1"
 prost = "0.12"
@@ -19,7 +20,6 @@ tokio = { version = "1.21.1", features = ["macros", "rt-multi-thread"] }
 tokio-stream = "0.1"
 tonic = { version = "0.10", features = ["gzip", "prost"] }
 tracing = "0.1"
-
 [dev-dependencies]
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
