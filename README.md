@@ -170,31 +170,6 @@ async fn main() {
 }
 ```
 
-#### Raw Execution Payloads
-
-Returns a stream of raw SSZ-encoded execution payloads. Decoding is left to the caller to handle.
-
-**Example:**
-
-```rs
-use fiber::Client;
-use tokio_stream::StreamExt;
-
-#[tokio::main]
-async fn main() {
-    // Client needs to be mutable
-    let mut client = Client::connect("ENDPOINT_URL", "API_KEY").await.unwrap();
-
-    // No filter in this example
-    let mut sub = client.subscribe_new_raw_execution_payloads().await;
-
-    // Use the stream as an async iterator
-    while let Some(raw_block) = sub.next().await {
-        handle_raw_block(raw_block);
-    }
-}
-```
-
 #### Beacon Blocks
 
 Returns a stream of consensus-layer [`SignedBeaconBlock`](https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#signedbeaconblock) objects.

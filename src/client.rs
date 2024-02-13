@@ -411,50 +411,6 @@ impl Client {
         UnboundedReceiverStream::new(rx)
     }
 
-    pub async fn subscribe_new_raw_execution_payloads(&self) -> impl Stream<Item = Bytes> {
-        let key = self.key.clone();
-
-        let mut req = Request::new(());
-        append_metadata(&mut req, &key);
-
-        let mut client = self.client.clone();
-        let (tx, rx) = mpsc::unbounded_channel();
-
-        tokio::spawn(async move {
-            loop {
-                let mut req = Request::new(());
-                append_metadata(&mut req, &key);
-
-                let mut stream = match client.subscribe_execution_payloads_v2(req).await {
-                    Ok(stream) => stream.into_inner(),
-                    Err(e) => {
-                        tracing::error!(error = ?e, "Error in execution payload stream, retrying...");
-                        tokio::time::sleep(Duration::from_secs(2)).await;
-                        continue;
-                    }
-                };
-
-                tracing::info!("Execution payload stream established");
-
-                while let Some(item) = stream.next().await {
-                    match item {
-                        Ok(payload) => {
-                            let _ = tx.send(payload.ssz_payload.into());
-                        }
-                        Err(e) => {
-                            tracing::error!(error = ?e, "Error in execution payload stream, retrying...");
-                            // If we get an error, we set the inner stream to None and break out of the loop.
-                            // Next iteration will retry the stream.
-                            break;
-                        }
-                    }
-                }
-            }
-        });
-
-        UnboundedReceiverStream::new(rx)
-    }
-
     /// Subscribes to new beacon blocks, returning a [`Stream`] of [`SignedBeaconBlock`].
     /// Note: the actual subscription takes place in the background.
     /// It will automatically retry every 2s if the stream fails.
