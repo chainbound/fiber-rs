@@ -73,7 +73,6 @@ async fn main() {
         handle_transaction(tx);
     }
 }
-
 ```
 
 #### Filtering
@@ -119,6 +118,31 @@ async fn main() {
 }
 ```
 
+#### Raw transactions
+
+Subscribing to raw transactions will return a `Stream`, yielding raw RLP encoded transactions.
+
+**Example:**
+
+```rs
+use fiber::Client;
+use tokio_stream::StreamExt;
+
+#[tokio::main]
+async fn main() {
+    // Client needs to be mutable
+    let mut client = Client::connect("ENDPOINT_URL", "API_KEY").await.unwrap();
+
+    // No filter in this example
+    let mut sub = client.subscribe_new_raw_transactions(None).await;
+
+    // Use the stream as an async iterator
+    while let Some(raw_tx) = sub.next().await {
+        handle_raw_transaction(tx);
+    }
+}
+```
+
 #### Execution Payloads (new block headers + transactions)
 
 Returns a stream of newly seen execution payloads. This is useful for getting the state updates of a
@@ -141,7 +165,32 @@ async fn main() {
 
     // Use the stream as an async iterator
     while let Some(block) = sub.next().await {
-        handle_block(tx);
+        handle_block(block);
+    }
+}
+```
+
+#### Raw Execution Payloads
+
+Returns a stream of raw SSZ-encoded execution payloads. Decoding is left to the caller to handle.
+
+**Example:**
+
+```rs
+use fiber::Client;
+use tokio_stream::StreamExt;
+
+#[tokio::main]
+async fn main() {
+    // Client needs to be mutable
+    let mut client = Client::connect("ENDPOINT_URL", "API_KEY").await.unwrap();
+
+    // No filter in this example
+    let mut sub = client.subscribe_new_raw_execution_payloads().await;
+
+    // Use the stream as an async iterator
+    while let Some(raw_block) = sub.next().await {
+        handle_raw_block(raw_block);
     }
 }
 ```
@@ -167,6 +216,31 @@ async fn main() {
     // Use the stream as an async iterator
     while let Some(block) = sub.next().await {
         handle_beacon_block(block);
+    }
+}
+```
+
+#### Raw beacon blocks
+
+Returns a stream of raw SSZ-encoded beacon blocks. Decoding is left to the caller to handle.
+
+**Example:**
+
+```rs
+use fiber::Client;
+use tokio_stream::StreamExt;
+
+#[tokio::main]
+async fn main() {
+    // Client needs to be mutable
+    let mut client = Client::connect("ENDPOINT_URL", "API_KEY").await.unwrap();
+
+    // No filter in this example
+    let mut sub = client.subscribe_new_raw_beacon_blocks().await;
+
+    // Use the stream as an async iterator
+    while let Some(raw_block) = sub.next().await {
+        handle_raw_beacon_block(raw_block);
     }
 }
 ```
