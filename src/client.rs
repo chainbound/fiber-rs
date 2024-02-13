@@ -18,6 +18,10 @@ use crate::{Dispatcher, SendType};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
+const BELLATRIX_DATA_VERSION: u32 = 3;
+const CAPELLA_DATA_VERSION: u32 = 4;
+const DENEB_DATA_VERSION: u32 = 5;
+
 #[derive(Debug, Default)]
 pub struct ClientOptions {
     send_compressed: bool,
@@ -363,32 +367,35 @@ impl Client {
                 while let Some(item) = stream.next().await {
                     match item {
                         Ok(payload) => {
-                            // ExecutionPayload::from_ssz_bytes(&payload.ssz_payload);
-                            let payload_deserialized = if payload.data_version == 1 {
-                                ExecutionPayloadV1::from_ssz_bytes(&payload.ssz_payload)
-                                    .map(ExecutionPayload::V1)
-                            } else if payload.data_version == 2 {
-                                ExecutionPayloadV2::from_ssz_bytes(&payload.ssz_payload)
-                                    .map(ExecutionPayload::V2)
-                            } else if payload.data_version == 3 {
-                                ExecutionPayloadV3::from_ssz_bytes(&payload.ssz_payload)
-                                    .map(ExecutionPayload::V3)
-                            } else {
-                                tracing::error!(
-                                    "Error deserializing execution payload: invalid data version"
-                                );
-                                continue;
+                            let payload_deserialized = match payload.data_version {
+                                BELLATRIX_DATA_VERSION => {
+                                    ExecutionPayloadV1::from_ssz_bytes(&payload.ssz_payload)
+                                        .map(ExecutionPayload::V1)
+                                }
+                                CAPELLA_DATA_VERSION => {
+                                    ExecutionPayloadV2::from_ssz_bytes(&payload.ssz_payload)
+                                        .map(ExecutionPayload::V2)
+                                }
+                                DENEB_DATA_VERSION => {
+                                    ExecutionPayloadV3::from_ssz_bytes(&payload.ssz_payload)
+                                        .map(ExecutionPayload::V3)
+                                }
+                                _ => {
+                                    tracing::error!(
+                                        data_version = payload.data_version,
+                                        "Error deserializing execution payload: invalid data version"
+                                    );
+                                    continue;
+                                }
                             };
 
-                            let payload_deserialized = match payload_deserialized {
-                                Ok(payload) => payload,
+                            match payload_deserialized {
+                                Ok(payload) => tx.send(payload).ok(),
                                 Err(e) => {
                                     tracing::error!(error = ?e, "Error deserializing execution payload");
                                     continue;
                                 }
                             };
-
-                            let _ = tx.send(payload_deserialized);
                         }
                         Err(e) => {
                             tracing::error!(error = ?e, "Error in execution payload stream, retrying...");

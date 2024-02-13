@@ -4,6 +4,5 @@ pub use dispatcher::{Dispatcher, SendType};
 pub mod client;
 pub use client::{Client, ClientOptions};
 
-pub mod generated;
-
-pub mod utils;
+pub(crate) mod generated;
+pub(crate) mod utils;
