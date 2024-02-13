@@ -11,7 +11,7 @@ use tokio_stream::{wrappers::UnboundedReceiverStream, Stream, StreamExt};
 use tonic::{codec::CompressionEncoding, transport::Channel, Request};
 
 use crate::generated::api::{
-    api_client::ApiClient, BlockSubmissionMsg, BlockSubmissionResponse, TxFilter, TxSequenceMsgV2,
+    api_client::ApiClient, BlockSubmissionMsg, BlockSubmissionResponse, TxFilter,
 };
 use crate::utils::append_metadata;
 use crate::{Dispatcher, SendType};
@@ -115,6 +115,24 @@ impl Client {
         Ok((res.hash.to_owned(), res.timestamp))
     }
 
+    /// Broadcasts a raw, RLP-encoded transaction to the Fiber Network. Returns hash and the timestamp
+    /// of when the first node received the transaction.
+    pub async fn send_raw_transaction(
+        &self,
+        raw_tx: Vec<u8>,
+    ) -> Result<(String, i64), Box<dyn std::error::Error>> {
+        let (res, rx) = oneshot::channel();
+
+        let _ = self.cmd_tx.send(SendType::RawTransaction {
+            raw_tx,
+            response: res,
+        });
+
+        let res = rx.await?;
+
+        Ok((res.hash.to_owned(), res.timestamp))
+    }
+
     /// Broadcasts a signed transaction sequence to the Fiber Network. Returns the array of hashes and
     /// the timestamp of when the first node received the sequence.
     pub async fn send_transaction_sequence(
@@ -123,17 +141,33 @@ impl Client {
     ) -> Result<(Vec<String>, i64), Box<dyn std::error::Error>> {
         let (res, rx) = oneshot::channel();
 
-        let sequence: Vec<Vec<u8>> = tx_sequence
-            .iter()
-            .map(|tx| {
-                let mut buf = Vec::new();
-                tx.encode_enveloped(&mut buf);
-                buf
-            })
+        let _ = self.cmd_tx.send(SendType::TransactionSequence {
+            msg: tx_sequence,
+            response: res,
+        });
+
+        let res = rx.await?;
+
+        let timestamp = res.sequence_response[0].timestamp;
+        let hashes = res
+            .sequence_response
+            .into_iter()
+            .map(|resp| resp.hash)
             .collect();
 
-        let _ = self.cmd_tx.send(SendType::TransactionSequence {
-            msg: TxSequenceMsgV2 { sequence },
+        Ok((hashes, timestamp))
+    }
+
+    /// Broadcasts a raw, RLP-encoded transaction sequence to the Fiber Network. Returns the array of hashes and
+    /// the timestamp of when the first node received the sequence.
+    pub async fn send_raw_transaction_sequence(
+        &self,
+        tx_sequence: Vec<Vec<u8>>,
+    ) -> Result<(Vec<String>, i64), Box<dyn std::error::Error>> {
+        let (res, rx) = oneshot::channel();
+
+        let _ = self.cmd_tx.send(SendType::RawTransactionSequence {
+            raw_txs: tx_sequence,
             response: res,
         });
 
@@ -168,7 +202,7 @@ impl Client {
     /// Subscribes to new transactions, returning a [`Stream`] of [`TransactionSignedEcRecovered`].
     /// Uses the given encoded filter to filter transactions. Note: the actual subscription takes place in
     /// the background. It will automatically retry every 2s if the stream fails.
-    pub async fn subscribe_transactions(
+    pub async fn subscribe_new_transactions(
         &self,
         filter: Option<Vec<u8>>,
     ) -> impl Stream<Item = TransactionSignedEcRecovered> {
@@ -246,7 +280,7 @@ impl Client {
     /// Subscribes to new raw transactions, returning a [`Stream`] of [`(Address, Bytes)`].
     /// Uses the given encoded filter to filter transactions. Note: the actual subscription takes place in
     /// the background. It will automatically retry every 2s if the stream fails.
-    pub async fn subscribe_raw_transactions(
+    pub async fn subscribe_new_raw_transactions(
         &self,
         filter: Option<Vec<u8>>,
     ) -> impl Stream<Item = (Address, Bytes)> {
@@ -311,7 +345,7 @@ impl Client {
     /// Subscribes to new execution payloads, returning a [`Stream`] of [`ExecutionPayload`].
     /// Note: the actual subscription takes place in the background.
     /// It will automatically retry every 2s if the stream fails.
-    pub async fn subscribe_execution_payloads(&self) -> impl Stream<Item = ExecutionPayload> {
+    pub async fn subscribe_new_execution_payloads(&self) -> impl Stream<Item = ExecutionPayload> {
         let key = self.key.clone();
 
         let mut req = Request::new(());
@@ -383,7 +417,7 @@ impl Client {
     /// Subscribes to new beacon blocks, returning a [`Stream`] of [`SignedBeaconBlock`].
     /// Note: the actual subscription takes place in the background.
     /// It will automatically retry every 2s if the stream fails.
-    pub async fn subscribe_beacon_blocks(&self) -> impl Stream<Item = SignedBeaconBlock> {
+    pub async fn subscribe_new_beacon_blocks(&self) -> impl Stream<Item = SignedBeaconBlock> {
         let key = self.key.clone();
 
         let mut req = Request::new(());
@@ -436,7 +470,7 @@ impl Client {
     /// Subscribes to new beacon blocks, returning a [`Stream`] of raw [`Bytes`].
     /// Note: the actual subscription takes place in the background.
     /// It will automatically retry every 2s if the stream fails.
-    pub async fn subscribe_raw_beacon_blocks(&self) -> impl Stream<Item = Bytes> {
+    pub async fn subscribe_new_raw_beacon_blocks(&self) -> impl Stream<Item = Bytes> {
         let key = self.key.clone();
 
         let mut req = Request::new(());

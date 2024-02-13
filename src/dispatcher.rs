@@ -19,8 +19,16 @@ pub enum SendType {
         tx: TransactionSigned,
         response: oneshot::Sender<TransactionResponse>,
     },
+    RawTransaction {
+        raw_tx: Vec<u8>,
+        response: oneshot::Sender<TransactionResponse>,
+    },
     TransactionSequence {
-        msg: TxSequenceMsgV2,
+        msg: Vec<TransactionSigned>,
+        response: oneshot::Sender<TxSequenceResponse>,
+    },
+    RawTransactionSequence {
+        raw_txs: Vec<Vec<u8>>,
         response: oneshot::Sender<TxSequenceResponse>,
     },
     Block {
@@ -119,9 +127,62 @@ impl Dispatcher {
                             }
                         }
                     }
+                    SendType::RawTransaction { raw_tx, response } => {
+                        if new_tx_sender
+                            .send(TransactionMsg {
+                                rlp_transaction: raw_tx,
+                            })
+                            .is_err()
+                        {
+                            tracing::error!("Failed sending raw transaction");
+                            break;
+                        }
+
+                        if let Some(res) = new_tx_responses.next().await {
+                            match res {
+                                Ok(res) => {
+                                    let _ = response.send(res);
+                                }
+                                Err(e) => {
+                                    tracing::error!(error = ?e, "Error in response stream, retrying...");
+                                    break;
+                                }
+                            }
+                        }
+                    }
                     SendType::TransactionSequence { msg, response } => {
-                        if new_tx_seq_sender.send(msg).is_err() {
+                        let mut rlp_transactions: Vec<Vec<u8>> = Vec::with_capacity(msg.len());
+                        for tx in msg {
+                            let mut rlp_transaction: Vec<u8> = Vec::new();
+                            tx.encode_enveloped(&mut rlp_transaction);
+                            rlp_transactions.push(rlp_transaction);
+                        }
+                        let sequence = TxSequenceMsgV2 {
+                            sequence: rlp_transactions,
+                        };
+
+                        if new_tx_seq_sender.send(sequence).is_err() {
                             tracing::error!("Failed sending transaction sequence");
+                            break;
+                        }
+
+                        if let Some(res) = new_tx_seq_responses.next().await {
+                            match res {
+                                Ok(res) => {
+                                    let _ = response.send(res);
+                                }
+                                Err(e) => {
+                                    tracing::error!(error = ?e, "Error in response stream, retrying...");
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    SendType::RawTransactionSequence { raw_txs, response } => {
+                        let sequence = TxSequenceMsgV2 { sequence: raw_txs };
+
+                        if new_tx_seq_sender.send(sequence).is_err() {
+                            tracing::error!("Failed sending raw transaction sequence");
                             break;
                         }
 

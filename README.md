@@ -1,17 +1,21 @@
 # `fiber-rs`
+
 Rust client package for interacting with a Fiber Network API over gRPC.
 
 ## Installation
+
 ```bash
 cargo add fiber --git https://github.com/chainbound/fiber-rs
 ```
 
 ## Usage
+
 `fiber-rs` prints traces to the `fiber` target. To see them, run your program with `RUST_LOG=fiber=info`.
 
 ### Connecting
 
 Using default options:
+
 ```rs
 use fiber::Client;
 
@@ -22,6 +26,7 @@ async fn main() {
 ```
 
 Specifying options:
+
 ```rs
 use fiber::{Client, ClientOptions};
 
@@ -33,19 +38,24 @@ async fn main() {
 ```
 
 ### Performance & Compression
+
 With `ClientOptions` you can negotiate incoming and outgoing stream compression. This activates gzip compression on the underlying gRPC connections. Compression is not always faster, and here are some general guidelines to follow:
+
 - If your client is close to the target Fiber node and you have enough bandwidth, it's best to disable `accept` compression.
 - If you client is far from the target Fiber node and you have limited bandwidth, it's best to enable `accept` compression.
 
 ### Subscriptions
+
 All subscriptions return a `Stream` (`UnboundedReceiverStream`) of the specified type.
 If the underlying gRPC stream fails due to connection issues, it will automatically be retried.
 
 #### Transactions
+
 Subscribing to transactions will return a `Stream`, yielding [`ethers::types::Transaction`](https://docs.rs/ethers/latest/ethers/types/struct.Transaction.html)
 for every new transaction that's received.
 
 **Example:**
+
 ```rs
 use fiber::Client;
 use tokio_stream::StreamExt;
@@ -56,7 +66,7 @@ async fn main() {
     let mut client = Client::connect("ENDPOINT_URL", "API_KEY").await.unwrap();
 
     // No filter in this example
-    let mut sub = client.subscribe_new_txs(None).await;
+    let mut sub = client.subscribe_new_transactions(None).await;
 
     // Use the stream as an async iterator
     while let Some(tx) = sub.next().await {
@@ -67,8 +77,10 @@ async fn main() {
 ```
 
 #### Filtering
+
 You can apply filters to the transaction stream using `fiber::filter::Filter`. The builder pattern is used
 for constructing a filter, with a couple of examples below.
+
 ```rs
 use fiber::{Client, filter::FilterBuilder};
 use tokio_stream::StreamExt;
@@ -108,11 +120,13 @@ async fn main() {
 ```
 
 #### Execution Payloads (new block headers + transactions)
+
 Returns a stream of newly seen execution payloads. This is useful for getting the state updates of a
 newly confirmed block. An `ExecutionPayload` contains both the block header and the transactions
 that were executed in that block.
 
 **Example:**
+
 ```rs
 use fiber::Client;
 use tokio_stream::StreamExt;
@@ -133,10 +147,12 @@ async fn main() {
 ```
 
 #### Execution Headers (new block headers only)
+
 Returns a stream of newly seen execution headers. This is useful for updating the state root and other
 block metadata without having to fetch all the transactions, which offers a latency improvement.
 
 **Example:**
+
 ```rs
 use fiber::Client;
 use tokio_stream::StreamExt;
@@ -157,9 +173,11 @@ async fn main() {
 ```
 
 #### Beacon Blocks
+
 Returns a stream of consensus-layer [`BeaconBlock`](https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#beaconblock) objects. NOTE: the `ExecutionPayload` is not included in this stream, please use the `subscribe_new_execution_payloads` stream if you need it.
 
 **Example:**
+
 ```rs
 use fiber::Client;
 use tokio_stream::StreamExt;
@@ -179,9 +197,10 @@ async fn main() {
 }
 ```
 
-
 ### Sending Transactions
+
 #### `send_raw_transaction`
+
 ```rs
 use ethers::{
     signers::{LocalWallet, Signer},
@@ -214,9 +233,12 @@ asyn fn main() {
     println!("{:?}", res);
 }
 ```
+
 #### `send_raw_transaction_sequence`
+
 Sends a sequence of RLP encoded transactions, for things like backrunning and other strategies
 where the explicitly stated order is important.
+
 ```rs
 use ethers::{
     signers::{LocalWallet, Signer},
