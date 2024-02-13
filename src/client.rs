@@ -22,7 +22,8 @@ const BELLATRIX_DATA_VERSION: u32 = 3;
 const CAPELLA_DATA_VERSION: u32 = 4;
 const DENEB_DATA_VERSION: u32 = 5;
 
-#[derive(Debug, Default)]
+/// Options for the API client
+#[derive(Debug, Default, Clone, Copy)]
 pub struct ClientOptions {
     send_compressed: bool,
     accept_compressed: bool,
@@ -30,13 +31,13 @@ pub struct ClientOptions {
 
 impl ClientOptions {
     /// Enables GZIP compression for outgoing data.
-    pub fn send_compressed(mut self, send_compressed: bool) -> Self {
+    pub const fn send_compressed(mut self, send_compressed: bool) -> Self {
         self.send_compressed = send_compressed;
         self
     }
 
     /// Enables GZIP compression for incoming data.
-    pub fn accept_compressed(mut self, accept_compressed: bool) -> Self {
+    pub const fn accept_compressed(mut self, accept_compressed: bool) -> Self {
         self.accept_compressed = accept_compressed;
         self
     }
@@ -45,6 +46,7 @@ impl ClientOptions {
 /// A client for interacting with the Fiber Network.
 /// This wraps the inner [`ApiClient`] and provides a more ergonomic interface, as well as
 /// automatic retries for streams.
+#[derive(Debug)]
 pub struct Client {
     key: String,
     client: ApiClient<Channel>,
@@ -57,6 +59,7 @@ impl Client {
         Self::connect_with_options(target, api_key, ClientOptions::default()).await
     }
 
+    /// Connects to the given gRPC target with the API key and options, returning a [`Client`] instance.
     pub async fn connect_with_options(
         target: impl Into<String>,
         api_key: impl Into<String>,

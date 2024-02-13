@@ -13,7 +13,10 @@ use crate::{
     utils::append_metadata,
 };
 
+/// The different types of messages that can be sent to the dispatcher
+#[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
+#[allow(missing_docs)]
 pub enum SendType {
     Transaction {
         tx: TransactionSigned,
@@ -38,13 +41,18 @@ pub enum SendType {
 }
 
 /// The dispatcher is responsible of handling request / response messages (like sending transactions)
+#[derive(Debug)]
 pub struct Dispatcher {
+    /// The receiver for the different types of messages that can be sent to the dispatcher
     pub cmd_rx: mpsc::UnboundedReceiver<SendType>,
+    /// The API client
     pub client: ApiClient<Channel>,
+    /// The API key
     pub api_key: String,
 }
 
 impl Dispatcher {
+    /// Consumes the dispatcher and runs the main loop in a background task.
     pub async fn run(mut self) {
         let api_key = self.api_key.clone();
         let mut client = self.client;
