@@ -149,6 +149,8 @@ Returns a stream of newly seen execution payloads. This is useful for getting th
 newly confirmed block. An `ExecutionPayload` contains both the block header and the transactions
 that were executed in that block.
 
+The type returned by this stream is an [`alloy-rpc-types::Block`](https://github.com/alloy-rs/alloy/blob/a4453d42ffb755a46bace2ceca3baa454e0cd807/crates/rpc-types/src/eth/block.rs#L18).
+
 **Example:**
 
 ```rs
