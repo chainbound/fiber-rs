@@ -51,7 +51,7 @@ If the underlying gRPC stream fails due to connection issues, it will automatica
 
 #### Transactions
 
-Subscribing to transactions will return a `Stream`, yielding [`ethers::types::Transaction`](https://docs.rs/ethers/latest/ethers/types/struct.Transaction.html)
+Subscribing to transactions will return a `Stream`, yielding [`reth_primitives::TransactionSignedEcRecovered`](https://github.com/paradigmxyz/reth/blob/0e166f0f326b86491c0b23a8cc483e8a224e9731/crates/primitives/src/transaction/mod.rs#L1474)
 for every new transaction that's received.
 
 **Example:**
@@ -110,7 +110,7 @@ async fn main() {
                     .to("0xdAC17F958D2ee523a2206206994597C13D831ec7");
 
     // Encode the filter
-    let mut sub = client.subscribe_new_txs(f.encode().unwrap()).await;
+    let mut sub = client.subscribe_new_transactions(f.encode().unwrap()).await;
 
     // Use the stream as an async iterator
     while let Some(tx) = sub.next().await {
@@ -146,35 +146,9 @@ async fn main() {
 }
 ```
 
-#### Execution Headers (new block headers only)
-
-Returns a stream of newly seen execution headers. This is useful for updating the state root and other
-block metadata without having to fetch all the transactions, which offers a latency improvement.
-
-**Example:**
-
-```rs
-use fiber::Client;
-use tokio_stream::StreamExt;
-
-#[tokio::main]
-async fn main() {
-    // Client needs to be mutable
-    let mut client = Client::connect("ENDPOINT_URL", "API_KEY").await.unwrap();
-
-    // No filter in this example
-    let mut sub = client.subscribe_new_execution_headers().await;
-
-    // Use the stream as an async iterator
-    while let Some(header) = sub.next().await {
-        handle_block_header(header);
-    }
-}
-```
-
 #### Beacon Blocks
 
-Returns a stream of consensus-layer [`BeaconBlock`](https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#beaconblock) objects. NOTE: the `ExecutionPayload` is not included in this stream, please use the `subscribe_new_execution_payloads` stream if you need it.
+Returns a stream of consensus-layer [`SignedBeaconBlock`](https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#signedbeaconblock) objects.
 
 **Example:**
 
@@ -199,36 +173,107 @@ async fn main() {
 
 ### Sending Transactions
 
-#### `send_raw_transaction`
+#### `send_transaction`
+
+Allows to broadcast transactions quickly to the Fiber network. It expects a [`reth_primitives::TransactionSigned`](https://github.com/paradigmxyz/reth/blob/0e166f0f326b86491c0b23a8cc483e8a224e9731/crates/primitives/src/transaction/mod.rs#L947) object, and returns the transaction hash and the timestamp of when the first Fiber node received it.
 
 ```rs
-use ethers::{
-    signers::{LocalWallet, Signer},
-    types::{transaction::eip2718::TypedTransaction, Address, TransactionRequest}, utils::hex::ToHex,
-};
+use reth_primitives::TransactionSigned;
 use fiber::Client;
 
 #[tokio::main]
-asyn fn main() {
+async fn main() {
     let mut client = Client::connect("ENDPOINT_URL", "API_KEY").await.unwrap();
 
-    let tx: TypedTransaction = TransactionRequest::new()
-        .nonce(3)
-        .gas_price(1)
-        .gas(25000)
-        .to("b94f5374fce5edbc8e2a8697c15331677e6ebf0b".parse::<Address>().unwrap())
-        .value(10)
-        .data(vec![0x55, 0x44])
-        .chain_id(1)
-        .into();
+    // Create a transaction and a signature for it
+    let tx = Transaction::Eip1559(TxEip1559 {
+        chain_id: 1,
+            nonce: 0x42,
+            gas_limit: 44386,
+            to: TransactionKind::Call( Address::from_str("0x6069a6c32cf691f5982febae4faf8a6f3ab2f0f6").unwrap()),
+            value: 0_u64.into(),
+            input:  hex::decode("a22cb4650000000000000000000000005eee75727d804a2b13038928d36f8b188945a57a0000000000000000000000000000000000000000000000000000000000000000").unwrap().into(),
+            max_fee_per_gas: 0x4a817c800,
+            max_priority_fee_per_gas: 0x3b9aca00,
+            access_list: AccessList::default(),
+    });
 
-    let wallet: LocalWallet = "PRIVATE_KEY".parse().unwrap();
+    let sig = Signature {
+        r: U256::from_str("0x840cfc572845f5786e702984c2a582528cad4b49b2a10b9db1be7fca90058565")
+            .unwrap(),
+        s: U256::from_str("0x25e7109ceb98168d95b09b18bbf6b685130e0562f233877d492b94eee0c5b6d1")
+            .unwrap(),
+        odd_y_parity: false,
+    };
 
-    let sig = wallet.sign_transaction(&tx.clone()).await.unwrap();
+    let signed_tx = TransactionSigned::from_transaction_and_signature(tx, sig);
 
-    let signed = tx.rlp_signed(&sig);
+    let res = client.send_transaction(signed_tx).await.unwrap();
 
-    let res = client.send_raw_transaction(&signed).await.unwrap();
+    println!("{:?}", res);
+}
+```
+
+#### `send_transaction_sequence`
+
+Sends a sequence of transactions to the Fiber network at once.
+
+```rs
+use reth_primitives::{Transaction, TxEip1559, Address, TransactionKind, AccessList, Signature, U256, TransactionSigned};
+use std::str::FromStr;
+use fiber::Client;
+
+#[tokio::main]
+async fn main() {
+    let mut client = Client::connect("ENDPOINT_URL", "API_KEY").await.unwrap();
+
+    // Provide a transaction with signature as the first transaction of the sequence
+    let tx = Transaction::Eip1559(TxEip1559 {
+        chain_id: 1,
+            nonce: 0x42,
+            gas_limit: 44386,
+            to: TransactionKind::Call( Address::from_str("0x6069a6c32cf691f5982febae4faf8a6f3ab2f0f6").unwrap()),
+            value: 0_u64.into(),
+            input:  hex::decode("a22cb4650000000000000000000000005eee75727d804a2b13038928d36f8b188945a57a0000000000000000000000000000000000000000000000000000000000000000").unwrap().into(),
+            max_fee_per_gas: 0x4a817c800,
+            max_priority_fee_per_gas: 0x3b9aca00,
+            access_list: AccessList::default(),
+    });
+
+    let sig = Signature {
+        r: U256::from_str("0x840cfc572845f5786e702984c2a582528cad4b49b2a10b9db1be7fca90058565")
+            .unwrap(),
+        s: U256::from_str("0x25e7109ceb98168d95b09b18bbf6b685130e0562f233877d492b94eee0c5b6d1")
+            .unwrap(),
+        odd_y_parity: false,
+    };
+
+    let signed_tx_1 = TransactionSigned::from_transaction_and_signature(tx, sig);
+
+    // Then, provide a second signed transaction from wherever you want
+    let tx_bytes = hex::decode("02f872018307910d808507204d2cb1827d0094388c818ca8b9251b393131c08a736a67ccb19297880320d04823e2701c80c001a0cf024f4815304df2867a1a74e9d2707b6abda0337d2d54a4438d453f4160f190a07ac0e6b3bc9395b5b9c8b9e6d77204a236577a5b18467b9175c01de4faa208d9").unwrap();
+    let signed_tx_2 = TransactionSigned::decode_enveloped(&mut &tx_bytes[..]).unwrap();
+
+    let res = client.send_transaction_sequence(vec![signed_tx_1, signed_tx_2]).await.unwrap();
+
+    println!("{:?}", res);
+}
+```
+
+#### `send_raw_transaction`
+
+Sends a raw RLP encoded transaction to the Fiber network.
+
+```rs
+use fiber::Client;
+
+#[tokio::main]
+async fn main() {
+    let mut client = Client::connect("ENDPOINT_URL", "API_KEY").await.unwrap();
+
+    let raw_tx = hex::decode("02f872018307910d808507204d2cb1827d0094388c818ca8b9251b393131c08a736a67ccb19297880320d04823e2701c80c001a0cf024f4815304df2867a1a74e9d2707b6abda0337d2d54a4438d453f4160f190a07ac0e6b3bc9395b5b9c8b9e6d77204a236577a5b18467b9175c01de4faa208d9").unwrap();
+
+    let res = client.send_raw_transaction(raw_tx).await.unwrap();
 
     println!("{:?}", res);
 }
@@ -240,36 +285,19 @@ Sends a sequence of RLP encoded transactions, for things like backrunning and ot
 where the explicitly stated order is important.
 
 ```rs
-use ethers::{
-    signers::{LocalWallet, Signer},
-    types::{transaction::eip2718::TypedTransaction, Address, TransactionRequest}, utils::hex::ToHex,
-};
 use fiber::Client;
 
 #[tokio::main]
 asyn fn main() {
     let mut client = Client::connect("ENDPOINT_URL", "API_KEY").await.unwrap();
 
-    let tx: TypedTransaction = TransactionRequest::new()
-        .nonce(3)
-        .gas_price(1)
-        .gas(25000)
-        .to("b94f5374fce5edbc8e2a8697c15331677e6ebf0b".parse::<Address>().unwrap())
-        .value(10)
-        .data(vec![0x55, 0x44])
-        .chain_id(1)
-        .into();
-
-    let wallet: LocalWallet = "PRIVATE_KEY".parse().unwrap();
-
-    let sig = wallet.sign_transaction(&tx.clone()).await.unwrap();
-
-    let signed = tx.rlp_signed(&sig);
+    // Our transaction, RLP-encoded
+    let raw_tx_1 = hex::decode("02f872018307910d808507204d2cb1827d0094388c818ca8b9251b393131c08a736a67ccb19297880320d04823e2701c80c001a0cf024f4815304df2867a1a74e9d2707b6abda0337d2d54a4438d453f4160f190a07ac0e6b3bc9395b5b9c8b9e6d77204a236577a5b18467b9175c01de4faa208d9").unwrap();
 
     // The target transaction should be an RLP encoded transaction as well
-    let target_tx: Vec<u8> = vec![...]
+    let target_tx_2: Vec<u8> = vec![...]
 
-    let res = client.send_raw_transaction_sequence(vec![target_tx, signed]).await.unwrap();
+    let res = client.send_raw_transaction_sequence(vec![raw_tx_1, target_tx_2]).await.unwrap();
 
     println!("{:?}", res);
 }

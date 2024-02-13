@@ -16,6 +16,8 @@ use crate::generated::api::{
 use crate::utils::append_metadata;
 use crate::{Dispatcher, SendType};
 
+type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
 #[derive(Debug, Default)]
 pub struct ClientOptions {
     send_compressed: bool,
@@ -47,10 +49,7 @@ pub struct Client {
 
 impl Client {
     /// Connects to the given gRPC target with the API key, returning a [`Client`] instance.
-    pub async fn connect(
-        target: impl Into<String>,
-        api_key: impl Into<String>,
-    ) -> Result<Client, Box<dyn std::error::Error>> {
+    pub async fn connect(target: impl Into<String>, api_key: impl Into<String>) -> Result<Client> {
         Self::connect_with_options(target, api_key, ClientOptions::default()).await
     }
 
@@ -58,7 +57,7 @@ impl Client {
         target: impl Into<String>,
         api_key: impl Into<String>,
         opts: ClientOptions,
-    ) -> Result<Client, Box<dyn std::error::Error>> {
+    ) -> Result<Client> {
         let target = target.into();
         let api_key = api_key.into();
 
@@ -100,10 +99,7 @@ impl Client {
 
     /// Broadcasts a signed transaction to the Fiber Network. Returns hash and the timestamp
     /// of when the first node received the transaction.
-    pub async fn send_transaction(
-        &self,
-        tx: TransactionSigned,
-    ) -> Result<(String, i64), Box<dyn std::error::Error>> {
+    pub async fn send_transaction(&self, tx: TransactionSigned) -> Result<(String, i64)> {
         let (res, rx) = oneshot::channel();
 
         let _ = self
@@ -117,10 +113,7 @@ impl Client {
 
     /// Broadcasts a raw, RLP-encoded transaction to the Fiber Network. Returns hash and the timestamp
     /// of when the first node received the transaction.
-    pub async fn send_raw_transaction(
-        &self,
-        raw_tx: Vec<u8>,
-    ) -> Result<(String, i64), Box<dyn std::error::Error>> {
+    pub async fn send_raw_transaction(&self, raw_tx: Vec<u8>) -> Result<(String, i64)> {
         let (res, rx) = oneshot::channel();
 
         let _ = self.cmd_tx.send(SendType::RawTransaction {
@@ -138,7 +131,7 @@ impl Client {
     pub async fn send_transaction_sequence(
         &self,
         tx_sequence: Vec<TransactionSigned>,
-    ) -> Result<(Vec<String>, i64), Box<dyn std::error::Error>> {
+    ) -> Result<(Vec<String>, i64)> {
         let (res, rx) = oneshot::channel();
 
         let _ = self.cmd_tx.send(SendType::TransactionSequence {
@@ -163,7 +156,7 @@ impl Client {
     pub async fn send_raw_transaction_sequence(
         &self,
         tx_sequence: Vec<Vec<u8>>,
-    ) -> Result<(Vec<String>, i64), Box<dyn std::error::Error>> {
+    ) -> Result<(Vec<String>, i64)> {
         let (res, rx) = oneshot::channel();
 
         let _ = self.cmd_tx.send(SendType::RawTransactionSequence {
@@ -185,10 +178,7 @@ impl Client {
 
     /// Publish an SSZ encoded block to the Fiber Network. Returns [`BlockSubmissionResponse`] which
     /// contains information about the newly published block.
-    pub async fn publish_block(
-        &self,
-        ssz_block: Vec<u8>,
-    ) -> Result<BlockSubmissionResponse, Box<dyn std::error::Error>> {
+    pub async fn publish_block(&self, ssz_block: Vec<u8>) -> Result<BlockSubmissionResponse> {
         let (res, rx) = oneshot::channel();
 
         let _ = self.cmd_tx.send(SendType::Block {
