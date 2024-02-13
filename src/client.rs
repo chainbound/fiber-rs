@@ -3,6 +3,7 @@ use std::time::Duration;
 use alloy_rpc_engine_types::{
     ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
 };
+use alloy_rpc_types::Block;
 use ethereum_consensus::{ssz::prelude::deserialize, types::mainnet::SignedBeaconBlock};
 use reth_primitives::{Address, Bytes, TransactionSigned, TransactionSignedEcRecovered};
 use ssz::Decode;
@@ -13,7 +14,7 @@ use tonic::{codec::CompressionEncoding, transport::Channel, Request};
 use crate::generated::api::{
     api_client::ApiClient, BlockSubmissionMsg, BlockSubmissionResponse, TxFilter,
 };
-use crate::utils::append_metadata;
+use crate::utils::{append_metadata, parse_execution_payload_to_block};
 use crate::{Dispatcher, SendType};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -339,10 +340,10 @@ impl Client {
         UnboundedReceiverStream::new(rx)
     }
 
-    /// Subscribes to new execution payloads, returning a [`Stream`] of [`ExecutionPayload`].
+    /// Subscribes to new execution payloads, returning a [`Stream`] of [`Block`]s.
     /// Note: the actual subscription takes place in the background.
     /// It will automatically retry every 2s if the stream fails.
-    pub async fn subscribe_new_execution_payloads(&self) -> impl Stream<Item = ExecutionPayload> {
+    pub async fn subscribe_new_execution_payloads(&self) -> impl Stream<Item = Block> {
         let key = self.key.clone();
 
         let mut req = Request::new(());
@@ -392,13 +393,18 @@ impl Client {
                                 }
                             };
 
-                            match payload_deserialized {
-                                Ok(payload) => tx.send(payload).ok(),
+                            let execution_payload = match payload_deserialized {
+                                Ok(payload) => payload,
                                 Err(e) => {
                                     tracing::error!(error = ?e, "Error deserializing execution payload");
                                     continue;
                                 }
                             };
+
+                            // Parse an ExecutionPayload into a Block
+                            let block = parse_execution_payload_to_block(execution_payload);
+
+                            let _ = tx.send(block);
                         }
                         Err(e) => {
                             tracing::error!(error = ?e, "Error in execution payload stream, retrying...");

@@ -9,7 +9,8 @@ authors = ["Chainbound <admin@chainbound.io>"]
 [dependencies]
 # types & decoding
 alloy-rpc-engine-types = { git = "https://github.com/alloy-rs/alloy", features = ["ssz"] }
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy" }
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", features = ["ssz"] }
+alloy-rlp = { git = "https://github.com/alloy-rs/rlp" }
 ethereum-consensus = { git = "https://github.com/ralexstokes/ethereum-consensus" }
 reth-primitives = { git = "https://github.com/paradigmxyz/reth", tag = "v0.1.0-alpha.17" }
 serde = { version = "1.0", features = ["derive", "rc"] }
