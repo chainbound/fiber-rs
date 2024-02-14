@@ -33,13 +33,13 @@ pub(crate) fn parse_execution_payload_to_block(payload: ExecutionPayload) -> Blo
     // Terminal difficulty (we don't support pre-Merge blocks)
     let diff = U256::from(58750003716598352816469u128);
 
+    // NOTE: missing fields are set to `None` or ZERO, and documented in the library as such.
     let header = Header {
         hash: Some(v1.block_hash),
         parent_hash: v1.parent_hash,
-        uncles_hash: B256::ZERO, // TODO: double check
+        uncles_hash: B256::ZERO,
         miner: v1.fee_recipient,
         state_root: v1.state_root,
-        transactions_root: B256::ZERO, // TODO: missing field
         receipts_root: v1.receipts_root,
         logs_bloom: v1.logs_bloom,
         difficulty: diff,
@@ -51,10 +51,11 @@ pub(crate) fn parse_execution_payload_to_block(payload: ExecutionPayload) -> Blo
         mix_hash: Some(v1.prev_randao),
         nonce: Some(B64::ZERO),
         base_fee_per_gas: Some(v1.base_fee_per_gas),
-        withdrawals_root: None, // TODO: missing field
         blob_gas_used: payload.as_v3().map(|v3| U64::from(v3.blob_gas_used)),
         excess_blob_gas: payload.as_v3().map(|v3| U64::from(v3.excess_blob_gas)),
-        parent_beacon_block_root: None, // TODO: missing field
+        transactions_root: B256::ZERO, // This field is missing in the ExecutonPayload.
+        withdrawals_root: None,        // This field is missing in the ExecutonPayload.
+        parent_beacon_block_root: None, // This field is missing in the ExecutonPayload.
     };
 
     let mut transactions = Vec::with_capacity(v1.transactions.len());

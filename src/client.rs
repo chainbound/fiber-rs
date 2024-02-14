@@ -343,6 +343,12 @@ impl Client {
     /// Subscribes to new execution payloads, returning a [`Stream`] of [`Block`]s.
     /// Note: the actual subscription takes place in the background.
     /// It will automatically retry every 2s if the stream fails.
+    ///
+    /// Since the blocks returned are parsed from consensus-layer payloads, they are missing
+    /// the following fields, which are set to `None` or `zero` in all stream items:
+    /// - `parent_beacon_block_root`
+    /// - `transactions_root`
+    /// - `withdrawals_root`
     pub async fn subscribe_new_execution_payloads(&self) -> impl Stream<Item = Block> {
         let key = self.key.clone();
 
