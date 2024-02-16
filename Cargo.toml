@@ -1,24 +1,37 @@
 [package]
 name = "fiber"
-version = "0.5.1"
+version = "0.6.0"
 edition = "2021"
+authors = ["Chainbound <admin@chainbound.io>"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-prost = "0.12"
+# types & decoding
+alloy-rpc-engine-types = { git = "https://github.com/alloy-rs/alloy", features = ["ssz"] }
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", features = ["ssz"] }
+alloy-rlp = { git = "https://github.com/alloy-rs/rlp" }
+ethereum-consensus = { git = "https://github.com/ralexstokes/ethereum-consensus" }
+reth-primitives = { git = "https://github.com/paradigmxyz/reth", tag = "v0.1.0-alpha.17" }
+serde = { version = "1.0", features = ["derive", "rc"] }
+ethereum_ssz = "0.5.3"
+base64 = "0.13.1"
+serde_json = "1.0"
+serde_repr = "0.1"
+hex = "0.4.3"
+
+# grpc
 tonic = { version = "0.10", features = ["gzip", "prost"] }
+prost = "0.12"
+
+# runtime
 tokio = { version = "1.21.1", features = ["macros", "rt-multi-thread"] }
-tracing = "0.1"
-ethers-core = "2.0.11"
 tokio-stream = "0.1"
 async-stream = "0.3"
 pin-project = "1"
-serde = { version = "1.0", features = ["derive", "rc"] }
-serde_json = "1.0"
-serde_repr = "0.1"
-base64 = "0.13.1"
-hex = "0.4.3"
+
+# metrics
+tracing = "0.1"
 
 [dev-dependencies]
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
