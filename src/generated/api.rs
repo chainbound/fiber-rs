@@ -204,6 +204,27 @@ pub mod api_client {
                 .insert(GrpcMethod::new("api.API", "SubscribeNewTxsV2"));
             self.inner.server_streaming(req, path, codec).await
         }
+        /// Opens a new blob transaction stream with the given filter.
+        pub async fn subscribe_new_blob_txs(
+            &mut self,
+            request: impl tonic::IntoRequest<()>,
+        ) -> std::result::Result<
+            tonic::Response<tonic::codec::Streaming<super::TransactionWithSenderMsg>>,
+            tonic::Status,
+        > {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::new(
+                    tonic::Code::Unknown,
+                    format!("Service was not ready: {}", e.into()),
+                )
+            })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/api.API/SubscribeNewBlobTxs");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("api.API", "SubscribeNewBlobTxs"));
+            self.inner.server_streaming(req, path, codec).await
+        }
         pub async fn send_transaction_v2(
             &mut self,
             request: impl tonic::IntoStreamingRequest<Message = super::TransactionMsg>,

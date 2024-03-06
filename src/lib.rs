@@ -20,6 +20,9 @@ pub use dispatcher::{Dispatcher, SendType};
 pub mod client;
 pub use client::{Client, ClientOptions};
 
+/// Module responsible for providing custom types.
+pub mod types;
+
 #[allow(unreachable_pub)]
 mod generated;
 mod utils;
