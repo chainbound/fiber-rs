@@ -5,7 +5,9 @@ use alloy_rpc_engine_types::{
 };
 use alloy_rpc_types::Block;
 use ethereum_consensus::{ssz::prelude::deserialize, types::mainnet::SignedBeaconBlock};
-use reth_primitives::{Address, Bytes, TransactionSigned, TransactionSignedEcRecovered};
+use reth_primitives::{
+    Address, Bytes, PooledTransactionsElement, TransactionSigned, TransactionSignedEcRecovered,
+};
 use ssz::Decode;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{wrappers::UnboundedReceiverStream, Stream, StreamExt};
@@ -14,6 +16,7 @@ use tonic::{codec::CompressionEncoding, transport::Channel, Request};
 use crate::generated::api::{
     api_client::ApiClient, BlockSubmissionMsg, BlockSubmissionResponse, TxFilter,
 };
+use crate::types::BlobTransactionSignedEcRecovered;
 use crate::utils::{append_metadata, parse_execution_payload_to_block};
 use crate::{Dispatcher, SendType};
 
@@ -239,7 +242,6 @@ impl Client {
                 while let Some(item) = stream.next().await {
                     match item {
                         Ok(transaction) => {
-                            // let transaction_encoded = Vec::new();
                             let signer = match Address::try_from(transaction.sender.as_slice()) {
                                 Ok(sender) => sender,
                                 Err(e) => {
@@ -256,6 +258,7 @@ impl Client {
                                     continue;
                                 }
                             };
+                            tracing::trace!(hash = ?signed_transaction.hash(), "Received transaction");
                             let _ = tx.send(TransactionSignedEcRecovered::from_signed_transaction(
                                 signed_transaction,
                                 signer,
@@ -312,7 +315,7 @@ impl Client {
                     }
                 };
 
-                tracing::info!("Transaction stream established");
+                tracing::info!("Raw transaction stream established");
 
                 while let Some(item) = stream.next().await {
                     match item {
@@ -328,6 +331,148 @@ impl Client {
                         }
                         Err(e) => {
                             tracing::error!(error = ?e, "Error in transaction stream, retrying...");
+                            // If we get an error, we set the inner stream to None and break out of the loop.
+                            // Next iteration will retry the stream.
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+
+        UnboundedReceiverStream::new(rx)
+    }
+
+    /// Subscribes to new blob transactions, returning a [`Stream`] of [`BlobTransactionSignedEcRecovered`].
+    /// Note: the actual subscription takes place in the background. It will automatically retry
+    /// every 2s if the stream fails.
+    pub async fn subscribe_new_blob_transactions(
+        &self,
+    ) -> impl Stream<Item = BlobTransactionSignedEcRecovered> {
+        let key = self.key.clone();
+
+        let mut req = Request::new(());
+        append_metadata(&mut req, &key);
+
+        let mut client = self.client.clone();
+
+        let (tx, rx) = mpsc::unbounded_channel();
+
+        tokio::spawn(async move {
+            loop {
+                let mut req = Request::new(());
+                append_metadata(&mut req, &key);
+
+                let mut stream = match client.subscribe_new_blob_txs(req).await {
+                    Ok(stream) => stream.into_inner(),
+                    Err(e) => {
+                        tracing::error!(error = ?e, "Error in transaction stream, retrying...");
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        continue;
+                    }
+                };
+
+                tracing::info!("Blob transaction stream established");
+
+                while let Some(item) = stream.next().await {
+                    match item {
+                        Ok(transaction) => {
+                            let signer = match Address::try_from(transaction.sender.as_slice()) {
+                                Ok(sender) => sender,
+                                Err(e) => {
+                                    tracing::error!(error = ?e, "Error deserializing sender");
+                                    continue;
+                                }
+                            };
+
+                            let pooled = match PooledTransactionsElement::decode_enveloped(
+                                transaction.rlp_transaction.into(),
+                            ) {
+                                Ok(pooled) => pooled,
+                                Err(e) => {
+                                    tracing::error!(error = ?e, "Error deserializing blob transaction");
+                                    continue;
+                                }
+                            };
+                            let blob_tx = match pooled {
+                                PooledTransactionsElement::BlobTransaction(blob_tx) => blob_tx,
+                                _ => {
+                                    tracing::error!(
+                                        "Wrong transaction type for blob transaction stream"
+                                    );
+                                    continue;
+                                }
+                            };
+
+                            tracing::trace!(hash = ?blob_tx.hash, "Received blob transaction");
+                            let _ = tx.send(BlobTransactionSignedEcRecovered {
+                                signed_transaction: blob_tx,
+                                signer,
+                            });
+                        }
+                        Err(e) => {
+                            tracing::error!(error = ?e, "Error in blob transaction stream, retrying...");
+                            // If we get an error, we set the inner stream to None and break out of the loop.
+                            // Next iteration will retry the stream.
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+
+        UnboundedReceiverStream::new(rx)
+    }
+
+    /// Subscribes to new raw blob transactions, returning a [`Stream`] of [`(Address, Bytes)`].
+    /// Note:
+    /// * transactions are returned with the "raw format" `type || rlp([tx_payload_body, blobs,
+    ///   commitments, proofs])` compatible with the `eth_sendRawTransaction` RPC method.
+    /// * the actual subscription takes place in the background. It will
+    ///   automatically retry every 2s if the stream fails.
+    pub async fn subscribe_new_raw_blob_transactions(
+        &self,
+    ) -> impl Stream<Item = (Address, Bytes)> {
+        let key = self.key.clone();
+
+        let mut req = Request::new(());
+        append_metadata(&mut req, &key);
+
+        let mut client = self.client.clone();
+
+        let (tx, rx) = mpsc::unbounded_channel();
+
+        tokio::spawn(async move {
+            loop {
+                let mut req = Request::new(());
+                append_metadata(&mut req, &key);
+
+                let mut stream = match client.subscribe_new_blob_txs(req).await {
+                    Ok(stream) => stream.into_inner(),
+                    Err(e) => {
+                        tracing::error!(error = ?e, "Error in transaction stream, retrying...");
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        continue;
+                    }
+                };
+
+                tracing::info!("Raw blob transaction stream established");
+
+                while let Some(item) = stream.next().await {
+                    match item {
+                        Ok(transaction) => {
+                            let signer = match Address::try_from(transaction.sender.as_slice()) {
+                                Ok(sender) => sender,
+                                Err(e) => {
+                                    tracing::error!(error = ?e, "Error deserializing sender");
+                                    continue;
+                                }
+                            };
+
+                            let _ = tx.send((signer, transaction.rlp_transaction.into()));
+                        }
+                        Err(e) => {
+                            tracing::error!(error = ?e, "Error in blob transaction stream, retrying...");
                             // If we get an error, we set the inner stream to None and break out of the loop.
                             // Next iteration will retry the stream.
                             break;
