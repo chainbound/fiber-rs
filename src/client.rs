@@ -258,6 +258,7 @@ impl Client {
                                     continue;
                                 }
                             };
+                            tracing::trace!(hash = ?signed_transaction.hash(), "Received transaction");
                             let _ = tx.send(TransactionSignedEcRecovered::from_signed_transaction(
                                 signed_transaction,
                                 signer,
@@ -403,6 +404,7 @@ impl Client {
                                 }
                             };
 
+                            tracing::trace!(hash = ?blob_tx.hash, "Received blob transaction");
                             let _ = tx.send(BlobTransactionSignedEcRecovered {
                                 signed_transaction: blob_tx,
                                 signer,
