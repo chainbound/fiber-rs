@@ -249,11 +249,28 @@ impl Client {
                                     continue;
                                 }
                             };
+
                             let signed_transaction = match TransactionSigned::decode_enveloped(
                                 &mut transaction.rlp_transaction.as_slice(),
                             ) {
                                 Ok(tx) => tx,
                                 Err(e) => {
+                                    if e.to_string() == "unexpected list" {
+                                        tracing::debug!("Received blob transaction in network protocol encoding");
+
+                                        // HOTFIX: In case we receive a transaction in its network protocol
+                                        // encoding, we strip the blob out and try to decode it again.
+                                        match PooledTransactionsElement::decode_enveloped(
+                                            transaction.rlp_transaction.into(),
+                                        ) {
+                                            Ok(pooled) => pooled.into_transaction(),
+                                            Err(e) => {
+                                                tracing::error!(error = ?e, "Error deserializing blob transaction");
+                                                continue;
+                                            }
+                                        };
+                                    }
+
                                     tracing::error!(error = ?e, "Error deserializing transaction");
                                     continue;
                                 }
