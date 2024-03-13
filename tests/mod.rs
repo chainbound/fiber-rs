@@ -4,7 +4,7 @@ use ethereum_consensus::{ssz::prelude::deserialize, types::mainnet::SignedBeacon
 use fiber::Client;
 use reth_primitives::{
     AccessList, Address, Signature, Transaction, TransactionKind, TransactionSigned, TxEip1559,
-    TxHash, B256, U256,
+    TxHash, TxType, B256, U256,
 };
 use tokio_stream::StreamExt;
 
@@ -14,7 +14,7 @@ mod decode;
 const FIBER_TEST_KEY: &str = env!("FIBER_TEST_KEY");
 
 /// Testing server endpoint
-const FIBER_TEST_ENDPOINT: &str = "localhost:8085";
+const FIBER_TEST_ENDPOINT: &str = "beta.fiberapi.io:8080";
 
 async fn get_client() -> Client {
     Client::connect(FIBER_TEST_ENDPOINT, FIBER_TEST_KEY)
@@ -30,7 +30,10 @@ async fn test_new_transactions() {
     let mut sub = client.subscribe_new_transactions(None).await;
 
     while let Some(tx) = sub.next().await {
-        dbg!(tx.hash().to_string());
+        if tx.tx_type() == TxType::EIP4844 {
+            println!("blob tx: {}", tx.hash());
+            println!("blob hashes: {:?}", tx.blob_versioned_hashes());
+        }
     }
 }
 
