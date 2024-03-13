@@ -255,11 +255,11 @@ impl Client {
                             ) {
                                 Ok(tx) => tx,
                                 Err(e) => {
+                                    // HOTFIX: In case we receive a transaction in its network protocol
+                                    // encoding, we strip the blob out and try to decode it again.
                                     if e.to_string() == "unexpected list" {
                                         tracing::debug!("Received blob transaction in network protocol encoding");
 
-                                        // HOTFIX: In case we receive a transaction in its network protocol
-                                        // encoding, we strip the blob out and try to decode it again.
                                         match PooledTransactionsElement::decode_enveloped(
                                             transaction.rlp_transaction.into(),
                                         ) {
@@ -268,11 +268,11 @@ impl Client {
                                                 tracing::error!(error = ?e, "Error deserializing blob transaction");
                                                 continue;
                                             }
-                                        };
+                                        }
+                                    } else {
+                                        tracing::error!(error = ?e, "Error deserializing transaction");
+                                        continue;
                                     }
-
-                                    tracing::error!(error = ?e, "Error deserializing transaction");
-                                    continue;
                                 }
                             };
                             tracing::trace!(hash = ?signed_transaction.hash(), "Received transaction");
