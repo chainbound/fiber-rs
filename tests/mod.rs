@@ -14,7 +14,7 @@ mod decode;
 const FIBER_TEST_KEY: &str = env!("FIBER_TEST_KEY");
 
 /// Testing server endpoint
-const FIBER_TEST_ENDPOINT: &str = "beta.fiberapi.io:8080";
+const FIBER_TEST_ENDPOINT: &str = "3.8.72.104:8080";
 
 async fn get_client() -> Client {
     Client::connect(FIBER_TEST_ENDPOINT, FIBER_TEST_KEY)
@@ -23,7 +23,7 @@ async fn get_client() -> Client {
 }
 
 #[tokio::test]
-async fn test_new_transactions() {
+async fn test_new_type_3_transactions() {
     let _ = tracing_subscriber::fmt::try_init();
     let client = get_client().await;
 
@@ -33,6 +33,55 @@ async fn test_new_transactions() {
         if tx.tx_type() == TxType::EIP4844 {
             println!("blob tx: {}", tx.hash());
             println!("blob hashes: {:?}", tx.blob_versioned_hashes());
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_new_blob_transactions() {
+    let _ = tracing_subscriber::fmt::try_init();
+    let client = get_client().await;
+    let mut start = std::time::Instant::now();
+
+    let mut sub = client.subscribe_new_blob_transactions().await;
+
+    let mut i = 0;
+    while let Some(tx) = sub.next().await {
+        println!(
+            "blob tx: {:?}, blobs: {}, time since last: {:?}",
+            tx.signed_transaction.hash,
+            tx.signed_transaction.sidecar.blobs.len(),
+            start.elapsed()
+        );
+        start = std::time::Instant::now();
+        i += 1;
+
+        if i > 10 {
+            break;
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_new_raw_blob_transactions() {
+    let _ = tracing_subscriber::fmt::try_init();
+    let client = get_client().await;
+    let mut start = std::time::Instant::now();
+
+    let mut sub = client.subscribe_new_raw_blob_transactions().await;
+
+    let mut i = 0;
+    while let Some(tx) = sub.next().await {
+        println!(
+            "raw blob tx length: {:?}, time since last: {:?}",
+            tx.1.len(),
+            start.elapsed()
+        );
+        start = std::time::Instant::now();
+        i += 1;
+
+        if i > 10 {
+            break;
         }
     }
 }

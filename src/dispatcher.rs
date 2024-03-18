@@ -107,7 +107,7 @@ impl Dispatcher {
                 }
             };
 
-            tracing::info!("All bi-directional streams established. Listening for commands...");
+            tracing::debug!("All bi-directional streams established. Listening for commands...");
 
             while let Some(cmd) = self.cmd_rx.recv().await {
                 match cmd {
