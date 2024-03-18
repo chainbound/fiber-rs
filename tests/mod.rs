@@ -14,7 +14,7 @@ mod decode;
 const FIBER_TEST_KEY: &str = env!("FIBER_TEST_KEY");
 
 /// Testing server endpoint
-const FIBER_TEST_ENDPOINT: &str = "3.8.72.104:8080";
+const FIBER_TEST_ENDPOINT: &str = "beta.fiberapi.io:8080";
 
 async fn get_client() -> Client {
     Client::connect(FIBER_TEST_ENDPOINT, FIBER_TEST_KEY)
