@@ -233,7 +233,7 @@ async fn main() {
 Allows to broadcast transactions quickly to the Fiber network. It expects a [`reth_primitives::TransactionSigned`](https://github.com/paradigmxyz/reth/blob/0e166f0f326b86491c0b23a8cc483e8a224e9731/crates/primitives/src/transaction/mod.rs#L947) object, and returns the transaction hash and the timestamp of when the first Fiber node received it.
 
 ```rs
-use reth_primitives::TransactionSigned;
+use reth_primitives::{Transaction, TxEip1559, Address, TransactionKind, AccessList, Signature, U256, TransactionSigned};
 use fiber::Client;
 
 #[tokio::main]
