@@ -91,9 +91,9 @@ pub(crate) fn parse_execution_payload_to_block(payload: ExecutionPayload) -> Blo
 
         let tx_type = match reth_tx.tx_type() {
             TxType::Legacy => 0,
-            TxType::EIP2930 => 1,
-            TxType::EIP1559 => 2,
-            TxType::EIP4844 => 3,
+            TxType::Eip2930 => 1,
+            TxType::Eip1559 => 2,
+            TxType::Eip4844 => 3,
         };
 
         let alloy_tx = Transaction {
@@ -104,7 +104,7 @@ pub(crate) fn parse_execution_payload_to_block(payload: ExecutionPayload) -> Blo
             transaction_index: Some(U256::from(index)), // TODO is this right?
             from: sender,
             to: reth_tx.to(),
-            value: reth_tx.value().into(),
+            value: reth_tx.value(),
             gas_price: Some(U128::from(reth_tx.max_fee_per_gas())),
             gas: U256::from(reth_tx.gas_limit()),
             max_fee_per_gas: Some(U128::from(reth_tx.max_fee_per_gas())),

@@ -30,7 +30,7 @@ async fn test_new_type_3_transactions() {
     let mut sub = client.subscribe_new_transactions(None).await;
 
     while let Some(tx) = sub.next().await {
-        if tx.tx_type() == TxType::EIP4844 {
+        if tx.tx_type() == TxType::Eip4844 {
             println!("blob tx: {}", tx.hash());
             println!("blob hashes: {:?}", tx.blob_versioned_hashes());
         }
@@ -153,7 +153,7 @@ async fn test_send_tx() {
             nonce: 0x42,
             gas_limit: 44386,
             to: TransactionKind::Call( Address::from_str("0x6069a6c32cf691f5982febae4faf8a6f3ab2f0f6").unwrap()),
-            value: 0_u64.into(),
+            value: U256::from(0),
             input:  hex::decode("a22cb4650000000000000000000000005eee75727d804a2b13038928d36f8b188945a57a0000000000000000000000000000000000000000000000000000000000000000").unwrap().into(),
             max_fee_per_gas: 0x4a817c800,
             max_priority_fee_per_gas: 0x3b9aca00,
