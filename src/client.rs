@@ -261,7 +261,7 @@ impl Client {
                                         tracing::debug!("Received blob transaction in network protocol encoding");
 
                                         match PooledTransactionsElement::decode_enveloped(
-                                            transaction.rlp_transaction.into(),
+                                            &mut transaction.rlp_transaction.as_ref(),
                                         ) {
                                             Ok(pooled) => pooled.into_transaction(),
                                             Err(e) => {
@@ -403,7 +403,7 @@ impl Client {
                             };
 
                             let pooled = match PooledTransactionsElement::decode_enveloped(
-                                transaction.rlp_transaction.into(),
+                                &mut transaction.rlp_transaction.as_ref(),
                             ) {
                                 Ok(pooled) => pooled,
                                 Err(e) => {
