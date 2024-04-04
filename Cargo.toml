@@ -2,23 +2,16 @@
 name = "fiber"
 version = "0.7.2"
 edition = "2021"
+license = "MIT"
 authors = ["Chainbound <admin@chainbound.io>"]
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 # types & decoding
-alloy-rpc-engine-types = { git = "https://github.com/alloy-rs/alloy", features = [
-    "ssz",
-], rev = "e127fed" }
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", features = [
-    "ssz",
-], rev = "e127fed" }
-alloy-rlp = { git = "https://github.com/alloy-rs/rlp" }
+alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", features = ["ssz"], rev = "7d5e42f" }
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", features = ["ssz"], rev = "7d5e42f" }
+alloy-rlp = { git = "https://github.com/alloy-rs/rlp", rev = "2ccf23f" }
 ethereum-consensus = { git = "https://github.com/ralexstokes/ethereum-consensus" }
-reth-primitives = { git = "https://github.com/paradigmxyz/reth", tag = "v0.2.0-beta.4", default-features = false, features = [
-    "c-kzg",
-] }
+reth-primitives = { git = "https://github.com/paradigmxyz/reth", rev = "ca82ff5be635caea3ee8408640bce85cb35ad77c", default-features = false, features = ["c-kzg"] }
 serde = { version = "1.0", features = ["derive", "rc"] }
 ethereum_ssz = "0.5.3"
 base64 = "0.13.1"
