@@ -1,6 +1,8 @@
-use alloy_rpc_engine_types::ExecutionPayload;
-use alloy_rpc_types::{AccessListItem, Block, BlockTransactions, Header, Signature, Transaction};
-use reth_primitives::{TransactionSigned, TxType, B256, B64, U128, U256, U64};
+use alloy_rpc_types::{
+    AccessList, AccessListItem, Block, BlockTransactions, Header, Signature, Transaction,
+};
+use alloy_rpc_types_engine::ExecutionPayload;
+use reth_primitives::{TransactionSigned, TxType, B256, B64, U256, U64, U8};
 use tonic::Request;
 
 const CLIENT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -36,6 +38,7 @@ pub(crate) fn parse_execution_payload_to_block(payload: ExecutionPayload) -> Blo
     // NOTE: missing fields are set to `None` or ZERO, and documented in the library as such.
     let header = Header {
         hash: Some(v1.block_hash),
+        total_difficulty: None,
         parent_hash: v1.parent_hash,
         uncles_hash: B256::ZERO,
         miner: v1.fee_recipient,
@@ -80,13 +83,15 @@ pub(crate) fn parse_execution_payload_to_block(payload: ExecutionPayload) -> Blo
         };
 
         let alloy_acl = reth_tx.access_list().map(|reth_acl| {
-            reth_acl
-                .iter()
-                .map(|reth_item| AccessListItem {
-                    address: reth_item.address,
-                    storage_keys: reth_item.storage_keys.clone(),
-                })
-                .collect()
+            AccessList(
+                reth_acl
+                    .iter()
+                    .map(|reth_item| AccessListItem {
+                        address: reth_item.address,
+                        storage_keys: reth_item.storage_keys.clone(),
+                    })
+                    .collect::<Vec<_>>(),
+            )
         });
 
         let tx_type = match reth_tx.tx_type() {
@@ -98,24 +103,24 @@ pub(crate) fn parse_execution_payload_to_block(payload: ExecutionPayload) -> Blo
 
         let alloy_tx = Transaction {
             hash: reth_tx.hash,
-            nonce: U64::from(reth_tx.nonce()),
+            nonce: reth_tx.nonce(),
             block_hash: Some(v1.block_hash),
             block_number: Some(U256::from(v1.block_number)),
             transaction_index: Some(U256::from(index)), // TODO is this right?
             from: sender,
             to: reth_tx.to(),
             value: reth_tx.value(),
-            gas_price: Some(U128::from(reth_tx.max_fee_per_gas())),
+            gas_price: Some(U256::from(reth_tx.max_fee_per_gas())),
             gas: U256::from(reth_tx.gas_limit()),
-            max_fee_per_gas: Some(U128::from(reth_tx.max_fee_per_gas())),
-            max_priority_fee_per_gas: reth_tx.max_priority_fee_per_gas().map(U128::from),
-            max_fee_per_blob_gas: reth_tx.max_fee_per_blob_gas().map(U128::from),
+            max_fee_per_gas: Some(U256::from(reth_tx.max_fee_per_gas())),
+            max_priority_fee_per_gas: reth_tx.max_priority_fee_per_gas().map(U256::from),
+            max_fee_per_blob_gas: reth_tx.max_fee_per_blob_gas().map(U256::from),
             input: reth_tx.input().clone(),
             signature: Some(alloy_sig),
-            chain_id: reth_tx.chain_id().map(U64::from),
-            blob_versioned_hashes: reth_tx.blob_versioned_hashes().unwrap_or_default(),
+            chain_id: reth_tx.chain_id(),
+            blob_versioned_hashes: reth_tx.blob_versioned_hashes(),
             access_list: alloy_acl,
-            transaction_type: Some(U64::from(tx_type)),
+            transaction_type: Some(U8::from(tx_type)),
             other: Default::default(),
         };
 
@@ -131,7 +136,6 @@ pub(crate) fn parse_execution_payload_to_block(payload: ExecutionPayload) -> Blo
         withdrawals,
         size: None,
         uncles: Vec::new(),
-        total_difficulty: Some(diff),
         other: Default::default(),
     }
 }
