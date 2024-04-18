@@ -54,6 +54,8 @@ If the underlying gRPC stream fails due to connection issues, it will automatica
 Subscribing to transactions will return a `Stream`, yielding [`reth_primitives::TransactionSignedEcRecovered`](https://github.com/paradigmxyz/reth/blob/0e166f0f326b86491c0b23a8cc483e8a224e9731/crates/primitives/src/transaction/mod.rs#L1474)
 for every new transaction that's received.
 
+**Note on EIP-4844:** Blob-carrying type 3 transactions are returned by the stream WITHOUT their blobs. The blobs are returned in a separate stream, `subscribe_new_blob_transactions`.
+
 **Example:**
 
 ```rs
@@ -71,6 +73,33 @@ async fn main() {
     // Use the stream as an async iterator
     while let Some(tx) = sub.next().await {
         handle_transaction(tx);
+    }
+}
+```
+
+#### Blob Transactions
+
+Subscribing to blob transactions will return a `Stream`, yielding [`BlobTransactionSignedEcRecovered`](./src/types.rs) for every new blob transaction that's received. This type is a simple wrapper over [reth_primitives::BlobTransaction](https://github.com/paradigmxyz/reth/blob/6863cdb42bbac29de57b66739c8e0fc7b4d5dbaa/crates/primitives/src/transaction/sidecar.rs#L54).
+
+**NOTE:** This stream will ONLY yield blob-carrying transactions with their blobs. To get all transactions, use `subscribe_new_transactions` instead.
+
+**Example:**
+
+```rs
+use fiber::Client;
+use tokio_stream::StreamExt;
+
+#[tokio::main]
+async fn main() {
+    // Client needs to be mutable
+    let mut client = Client::connect("ENDPOINT_URL", "API_KEY").await.unwrap();
+
+    // No filter in this example
+    let mut sub = client.subscribe_new_blob_transactions().await;
+
+    // Use the stream as an async iterator
+    while let Some(tx) = sub.next().await {
+        handle_blob_transaction(tx);
     }
 }
 ```
