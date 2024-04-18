@@ -28,7 +28,6 @@ tokio = { version = "1.21.1", features = ["macros", "rt-multi-thread"] }
 tokio-stream = "0.1"
 async-stream = "0.3"
 pin-project = "1"
-async-trait = "0.1.80"
 
 # metrics
 tracing = "0.1"
