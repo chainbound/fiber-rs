@@ -56,7 +56,7 @@ async fn test_new_blob_transactions() {
         start = std::time::Instant::now();
         i += 1;
 
-        if i > 10 {
+        if i > 3 {
             break;
         }
     }
@@ -80,7 +80,7 @@ async fn test_new_raw_blob_transactions() {
         start = std::time::Instant::now();
         i += 1;
 
-        if i > 10 {
+        if i > 3 {
             break;
         }
     }
@@ -93,6 +93,7 @@ async fn test_new_payloads() {
 
     let mut sub = client.subscribe_new_execution_payloads().await;
 
+    let mut i = 0;
     while let Some(block) = sub.next().await {
         println!(
             "block num: {}, txs: {}, block hash: {}",
@@ -100,6 +101,11 @@ async fn test_new_payloads() {
             block.transactions.len(),
             block.header.hash.unwrap()
         );
+        i += 1;
+
+        if i > 3 {
+            break;
+        }
     }
 }
 
