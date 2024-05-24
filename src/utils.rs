@@ -2,7 +2,7 @@ use alloy_rpc_types::{
     AccessList, AccessListItem, Block, BlockTransactions, Header, Signature, Transaction,
 };
 use alloy_rpc_types_engine::ExecutionPayload;
-use reth_primitives::{TransactionSigned, TxType, B256, B64, U256, U64, U8};
+use reth_primitives::{TransactionSigned, B256, B64, U256, U64, U8};
 use tonic::Request;
 
 const CLIENT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -63,22 +63,19 @@ pub(crate) fn parse_execution_payload_to_block(payload: ExecutionPayload) -> Blo
 
     let mut transactions = Vec::with_capacity(v1.transactions.len());
     for (index, raw_transaction) in v1.transactions.iter().enumerate() {
-        let reth_tx = match TransactionSigned::decode_enveloped(&mut raw_transaction.as_ref()) {
-            Ok(tx) => tx,
-            Err(e) => {
-                tracing::error!("failed to decode transaction: {}", e);
-                continue;
-            }
+        let Ok(reth_tx) = TransactionSigned::decode_enveloped(&mut raw_transaction.as_ref()) else {
+            tracing::error!("failed to RLP-decode tx in block: {}", v1.block_hash);
+            continue;
         };
         let Some(sender) = reth_tx.recover_signer() else {
-            tracing::error!("failed to recover tx signer");
+            tracing::error!("failed to recover tx signer for tx: {}", reth_tx.hash);
             continue;
         };
 
         let alloy_sig = Signature {
-            v: U256::from(reth_tx.signature().v(reth_tx.chain_id())),
             r: reth_tx.signature().r,
             s: reth_tx.signature().s,
+            v: U256::from(reth_tx.signature().v(reth_tx.chain_id())),
             y_parity: Some(reth_tx.signature().odd_y_parity.into()),
         };
 
@@ -94,19 +91,12 @@ pub(crate) fn parse_execution_payload_to_block(payload: ExecutionPayload) -> Blo
             )
         });
 
-        let tx_type = match reth_tx.tx_type() {
-            TxType::Legacy => 0,
-            TxType::Eip2930 => 1,
-            TxType::Eip1559 => 2,
-            TxType::Eip4844 => 3,
-        };
-
         let alloy_tx = Transaction {
             hash: reth_tx.hash,
             nonce: reth_tx.nonce(),
             block_hash: Some(v1.block_hash),
             block_number: Some(U256::from(v1.block_number)),
-            transaction_index: Some(U256::from(index)), // TODO is this right?
+            transaction_index: Some(U256::from(index)),
             from: sender,
             to: reth_tx.to(),
             value: reth_tx.value(),
@@ -120,7 +110,7 @@ pub(crate) fn parse_execution_payload_to_block(payload: ExecutionPayload) -> Blo
             chain_id: reth_tx.chain_id(),
             blob_versioned_hashes: reth_tx.blob_versioned_hashes(),
             access_list: alloy_acl,
-            transaction_type: Some(U8::from(tx_type)),
+            transaction_type: Some(U8::from(u8::from(reth_tx.tx_type()))),
             other: Default::default(),
         };
 
