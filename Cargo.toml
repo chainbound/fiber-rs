@@ -7,11 +7,17 @@ authors = ["Chainbound <admin@chainbound.io>"]
 
 [dependencies]
 # types & decoding
-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", features = ["ssz"], rev = "7d5e42f" }
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", features = ["ssz"], rev = "7d5e42f" }
-alloy-rlp = { git = "https://github.com/alloy-rs/rlp", rev = "2ccf23f" }
-ethereum-consensus = { git = "https://github.com/ralexstokes/ethereum-consensus", rev = "c2d8cff" }
-reth-primitives = { git = "https://github.com/paradigmxyz/reth", rev = "ca82ff5be635caea3ee8408640bce85cb35ad77c", default-features = false, features = ["c-kzg"] }
+alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", features = [
+    "ssz",
+], rev = "7d5e42f" }
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", features = [
+    "ssz",
+], rev = "7d5e42f" }
+alloy-rlp = "0.3"
+ethereum-consensus = { git = "https://github.com/ralexstokes/ethereum-consensus", rev = "cf3c404" }
+reth-primitives = { git = "https://github.com/paradigmxyz/reth", tag = "v0.2.0-beta.6", default-features = false, features = [
+    "c-kzg",
+] }
 serde = { version = "1.0", features = ["derive", "rc"] }
 ethereum_ssz = "0.5.3"
 base64 = "0.13.1"
