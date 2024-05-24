@@ -239,7 +239,7 @@ pub struct SignedVoluntaryExit {
 }
 /// <https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#voluntaryexit>
 #[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
+#[derive(Copy, Clone, PartialEq, ::prost::Message)]
 pub struct VoluntaryExit {
     #[prost(uint64, tag = "1")]
     pub epoch: u64,
