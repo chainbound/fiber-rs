@@ -1,25 +1,25 @@
 [package]
 name = "fiber"
-version = "0.7.2"
+version = "0.7.4"
 edition = "2021"
 license = "MIT"
 authors = ["Chainbound <admin@chainbound.io>"]
 
 [dependencies]
-# types & decoding
-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", features = [
-    "ssz",
-], rev = "7d5e42f" }
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", features = [
-    "ssz",
-], rev = "7d5e42f" }
+# alloy
+alloy-rpc-types-engine = { version = "0.1.3", features = ["ssz"] }
+alloy-rpc-types = { version = "0.1.3", features = ["ssz"] }
 alloy-rlp = "0.3"
+
+# reth
+reth-primitives = { git = "https://github.com/paradigmxyz/reth", tag = "v1.0.0", default-features = false, features = ["std", "c-kzg"] }
+
+# ethereum
 ethereum-consensus = { git = "https://github.com/ralexstokes/ethereum-consensus", rev = "cf3c404" }
-reth-primitives = { git = "https://github.com/paradigmxyz/reth", tag = "v0.2.0-beta.6", default-features = false, features = [
-    "c-kzg",
-] }
-serde = { version = "1.0", features = ["derive", "rc"] }
 ethereum_ssz = "0.5.3"
+
+# serialization
+serde = { version = "1.0", features = ["derive", "rc"] }
 base64 = "0.13.1"
 serde_json = "1.0"
 serde_repr = "0.1"

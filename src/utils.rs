@@ -2,7 +2,7 @@ use alloy_rpc_types::{
     AccessList, AccessListItem, Block, BlockTransactions, Header, Signature, Transaction,
 };
 use alloy_rpc_types_engine::ExecutionPayload;
-use reth_primitives::{TransactionSigned, B256, B64, U256, U64, U8};
+use reth_primitives::{TransactionSigned, B256, B64, U256};
 use tonic::Request;
 
 const CLIENT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -46,19 +46,20 @@ pub(crate) fn parse_execution_payload_to_block(payload: ExecutionPayload) -> Blo
         receipts_root: v1.receipts_root,
         logs_bloom: v1.logs_bloom,
         difficulty: diff,
-        number: Some(U256::from(v1.block_number)),
-        gas_limit: U256::from(v1.gas_limit),
-        gas_used: U256::from(v1.gas_used),
-        timestamp: U256::from(v1.timestamp),
+        number: Some(v1.block_number),
+        gas_limit: v1.gas_limit as u128,
+        gas_used: v1.gas_used as u128,
+        timestamp: v1.timestamp,
         extra_data: v1.extra_data.clone(),
         mix_hash: Some(v1.prev_randao),
         nonce: Some(B64::ZERO),
-        base_fee_per_gas: Some(v1.base_fee_per_gas),
-        blob_gas_used: payload.as_v3().map(|v3| U64::from(v3.blob_gas_used)),
-        excess_blob_gas: payload.as_v3().map(|v3| U64::from(v3.excess_blob_gas)),
+        base_fee_per_gas: Some(v1.base_fee_per_gas.to()),
+        blob_gas_used: payload.as_v3().map(|v3| v3.blob_gas_used as u128),
+        excess_blob_gas: payload.as_v3().map(|v3| v3.excess_blob_gas as u128),
         transactions_root: B256::ZERO, // This field is missing in the ExecutonPayload.
         withdrawals_root: None,        // This field is missing in the ExecutonPayload.
         parent_beacon_block_root: None, // This field is missing in the ExecutonPayload.
+        requests_root: None,           // This field is missing in the ExecutonPayload.
     };
 
     let mut transactions = Vec::with_capacity(v1.transactions.len());
@@ -95,22 +96,22 @@ pub(crate) fn parse_execution_payload_to_block(payload: ExecutionPayload) -> Blo
             hash: reth_tx.hash,
             nonce: reth_tx.nonce(),
             block_hash: Some(v1.block_hash),
-            block_number: Some(U256::from(v1.block_number)),
-            transaction_index: Some(U256::from(index)),
+            block_number: Some(v1.block_number),
+            transaction_index: Some(index as u64),
             from: sender,
             to: reth_tx.to(),
             value: reth_tx.value(),
-            gas_price: Some(U256::from(reth_tx.max_fee_per_gas())),
-            gas: U256::from(reth_tx.gas_limit()),
-            max_fee_per_gas: Some(U256::from(reth_tx.max_fee_per_gas())),
-            max_priority_fee_per_gas: reth_tx.max_priority_fee_per_gas().map(U256::from),
-            max_fee_per_blob_gas: reth_tx.max_fee_per_blob_gas().map(U256::from),
+            gas_price: Some(reth_tx.max_fee_per_gas()),
+            gas: reth_tx.gas_limit() as u128,
+            max_fee_per_gas: Some(reth_tx.max_fee_per_gas()),
+            max_priority_fee_per_gas: reth_tx.max_priority_fee_per_gas(),
+            max_fee_per_blob_gas: reth_tx.max_fee_per_blob_gas(),
             input: reth_tx.input().clone(),
             signature: Some(alloy_sig),
             chain_id: reth_tx.chain_id(),
             blob_versioned_hashes: reth_tx.blob_versioned_hashes(),
             access_list: alloy_acl,
-            transaction_type: Some(U8::from(u8::from(reth_tx.tx_type()))),
+            transaction_type: Some(u8::from(reth_tx.tx_type())),
             other: Default::default(),
         };
 
