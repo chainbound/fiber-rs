@@ -32,7 +32,6 @@ jobs:
       - name: Run tests
         run: |
           cargo nextest run \
-            --locked \
             --workspace \
             -E "kind(lib) | kind(bin) | kind(proc-macro)"
 
