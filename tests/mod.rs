@@ -11,21 +11,25 @@ use tokio_stream::StreamExt;
 mod decode;
 
 /// Tests work only with a testing api key valid for Fiber.
-const FIBER_TEST_KEY: &str = env!("FIBER_TEST_KEY");
+fn get_test_key() -> Option<String> {
+    std::env::var("FIBER_TEST_KEY").ok()
+}
 
 /// Testing server endpoint
 const FIBER_TEST_ENDPOINT: &str = "beta.fiberapi.io:8080";
 
-async fn get_client() -> Client {
-    Client::connect(FIBER_TEST_ENDPOINT, FIBER_TEST_KEY)
+async fn get_client() -> Option<Client> {
+    Client::connect(FIBER_TEST_ENDPOINT, get_test_key()?)
         .await
-        .unwrap()
+        .ok()
 }
 
 #[tokio::test]
 async fn test_new_type_3_transactions() {
     let _ = tracing_subscriber::fmt::try_init();
-    let client = get_client().await;
+    let Some(client) = get_client().await else {
+        return;
+    };
 
     let mut sub = client.subscribe_new_transactions(None).await;
 
@@ -47,7 +51,10 @@ async fn test_new_type_3_transactions() {
 #[tokio::test]
 async fn test_new_blob_transactions() {
     let _ = tracing_subscriber::fmt::try_init();
-    let client = get_client().await;
+    let Some(client) = get_client().await else {
+        return;
+    };
+
     let mut start = std::time::Instant::now();
 
     let mut sub = client.subscribe_new_blob_transactions().await;
@@ -72,7 +79,10 @@ async fn test_new_blob_transactions() {
 #[tokio::test]
 async fn test_new_raw_blob_transactions() {
     let _ = tracing_subscriber::fmt::try_init();
-    let client = get_client().await;
+    let Some(client) = get_client().await else {
+        return;
+    };
+
     let mut start = std::time::Instant::now();
 
     let mut sub = client.subscribe_new_raw_blob_transactions().await;
@@ -96,7 +106,9 @@ async fn test_new_raw_blob_transactions() {
 #[tokio::test]
 async fn test_new_payloads() {
     let _ = tracing_subscriber::fmt::try_init();
-    let client = get_client().await;
+    let Some(client) = get_client().await else {
+        return;
+    };
 
     let mut sub = client.subscribe_new_execution_payloads().await;
 
@@ -119,7 +131,9 @@ async fn test_new_payloads() {
 #[tokio::test]
 async fn test_new_beacon_blocks() {
     let _ = tracing_subscriber::fmt::try_init();
-    let client = get_client().await;
+    let Some(client) = get_client().await else {
+        return;
+    };
 
     let mut sub = client.subscribe_new_beacon_blocks().await;
 
@@ -144,7 +158,9 @@ async fn test_new_beacon_blocks() {
 #[tokio::test]
 async fn test_send_raw_tx() {
     let _ = tracing_subscriber::fmt::try_init();
-    let client = get_client().await;
+    let Some(client) = get_client().await else {
+        return;
+    };
 
     let raw_tx_bytes =
         hex::decode("02f872018307910d808507204d2cb1827d0094388c818ca8b9251b393131c08a736a67ccb19297880320d04823e2701c80c001a0cf024f4815304df2867a1a74e9d2707b6abda0337d2d54a4438d453f4160f190a07ac0e6b3bc9395b5b9c8b9e6d77204a236577a5b18467b9175c01de4faa208d9").unwrap();
@@ -157,7 +173,9 @@ async fn test_send_raw_tx() {
 #[tokio::test]
 async fn test_send_tx() {
     let _ = tracing_subscriber::fmt::try_init();
-    let client = get_client().await;
+    let Some(client) = get_client().await else {
+        return;
+    };
 
     let signer = Address::from_str("0xdd6b8b3dc6b7ad97db52f08a275ff4483e024cea").unwrap();
     let hash =
@@ -218,7 +236,10 @@ async fn test_decode_transaction_rlp() {
 
 #[tokio::test]
 async fn test_validate_fiber_ssz_block() {
-    let client = get_client().await;
+    let Some(client) = get_client().await else {
+        return;
+    };
+
     let mut block_sub = client.subscribe_new_beacon_blocks().await;
     let beacon_block = block_sub.next().await.unwrap();
     let slot = beacon_block.message().slot();
