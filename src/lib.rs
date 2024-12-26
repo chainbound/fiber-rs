@@ -10,6 +10,7 @@ Please see the repository [README](https://github.com/chainbound/fiber-rs/blob/m
 )]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 /// Module responsible for dispatching requests to the API backend.
 /// This spawns a tokio task to handle requests and responses in the background.
@@ -19,9 +20,6 @@ pub use dispatcher::{Dispatcher, SendType};
 /// Module responsible for handling the public-facing API client.
 pub mod client;
 pub use client::{Client, ClientOptions};
-
-/// Module responsible for providing custom types.
-pub mod types;
 
 #[allow(unreachable_pub)]
 mod generated;

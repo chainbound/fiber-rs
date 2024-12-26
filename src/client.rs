@@ -1,4 +1,6 @@
 use std::{
+    fmt::Debug,
+    str::FromStr,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -6,10 +8,11 @@ use std::{
 use alloy::{
     consensus::{
         transaction::{PooledTransaction, Recovered},
-        Block, TxEnvelope,
+        Block, Signed, TxEip4844WithSidecar, TxEnvelope,
     },
     eips::eip2718::Decodable2718,
-    primitives::{Address, Bytes},
+    hex::FromHexError,
+    primitives::{Address, Bytes, B256},
     rpc::types::engine::{
         ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
     },
@@ -26,11 +29,10 @@ use tonic::{codec::CompressionEncoding, transport::Channel, Request};
 use crate::generated::api::{
     api_client::ApiClient, BlockSubmissionMsg, BlockSubmissionResponse, TxFilter,
 };
-use crate::types::BlobTransactionSignedEcRecovered;
 use crate::utils::{append_metadata, parse_execution_payload_to_block};
 use crate::{Dispatcher, SendType};
 
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+type FiberResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 const BELLATRIX_DATA_VERSION: u32 = 3;
 const CAPELLA_DATA_VERSION: u32 = 4;
@@ -61,7 +63,6 @@ impl ClientOptions {
 ///
 /// This wraps the inner [`ApiClient`] and provides a more ergonomic interface, as well as
 /// automatic retries for streams.
-#[derive(Debug)]
 pub struct Client {
     key: String,
     client: ApiClient<Channel>,
@@ -69,9 +70,21 @@ pub struct Client {
     background_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
 }
 
+impl Debug for Client {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Client")
+            .field("key", &"********")
+            .field("client", &self.client)
+            .finish()
+    }
+}
+
 impl Client {
     /// Connects to the given gRPC target with the API key, returning a [`Client`] instance.
-    pub async fn connect(target: impl Into<String>, api_key: impl Into<String>) -> Result<Client> {
+    pub async fn connect(
+        target: impl Into<String>,
+        api_key: impl Into<String>,
+    ) -> FiberResult<Client> {
         Self::connect_with_options(target, api_key, ClientOptions::default()).await
     }
 
@@ -80,7 +93,7 @@ impl Client {
         target: impl Into<String>,
         api_key: impl Into<String>,
         opts: ClientOptions,
-    ) -> Result<Client> {
+    ) -> FiberResult<Client> {
         let target = target.into();
         let api_key = api_key.into();
 
@@ -133,7 +146,7 @@ impl Client {
 
     /// Broadcasts a signed transaction to the Fiber Network. Returns hash and the timestamp
     /// of when the first node received the transaction.
-    pub async fn send_transaction(&self, tx: TxEnvelope) -> Result<(String, i64)> {
+    pub async fn send_transaction(&self, tx: TxEnvelope) -> FiberResult<(B256, i64)> {
         let (response, rx) = oneshot::channel();
 
         let cmd = SendType::Transaction { tx, response };
@@ -141,12 +154,12 @@ impl Client {
 
         let res = rx.await?;
 
-        Ok((res.hash.to_owned(), res.timestamp))
+        Ok((B256::from_str(&res.hash)?, res.timestamp))
     }
 
     /// Broadcasts a raw, RLP-encoded transaction to the Fiber Network. Returns hash and the timestamp
     /// of when the first node received the transaction.
-    pub async fn send_raw_transaction(&self, raw_tx: Vec<u8>) -> Result<(String, i64)> {
+    pub async fn send_raw_transaction(&self, raw_tx: Vec<u8>) -> FiberResult<(B256, i64)> {
         let (response, rx) = oneshot::channel();
 
         let cmd = SendType::RawTransaction { raw_tx, response };
@@ -154,7 +167,7 @@ impl Client {
 
         let res = rx.await?;
 
-        Ok((res.hash.to_owned(), res.timestamp))
+        Ok((B256::from_str(&res.hash)?, res.timestamp))
     }
 
     /// Broadcasts a signed transaction sequence to the Fiber Network. Returns the array of hashes and
@@ -162,7 +175,7 @@ impl Client {
     pub async fn send_transaction_sequence(
         &self,
         tx_sequence: Vec<TxEnvelope>,
-    ) -> Result<(Vec<String>, i64)> {
+    ) -> FiberResult<(Vec<B256>, i64)> {
         let (response, rx) = oneshot::channel();
 
         let cmd = SendType::TransactionSequence {
@@ -177,8 +190,9 @@ impl Client {
         let hashes = res
             .sequence_response
             .into_iter()
-            .map(|resp| resp.hash)
-            .collect();
+            .map(|resp| B256::from_str(&resp.hash))
+            .collect::<Result<Vec<B256>, FromHexError>>()
+            .map_err(|e| e.to_string())?;
 
         Ok((hashes, timestamp))
     }
@@ -188,7 +202,7 @@ impl Client {
     pub async fn send_raw_transaction_sequence(
         &self,
         tx_sequence: Vec<Vec<u8>>,
-    ) -> Result<(Vec<String>, i64)> {
+    ) -> FiberResult<(Vec<B256>, i64)> {
         let (res, rx) = oneshot::channel();
 
         let _ = self.cmd_tx.send(SendType::RawTransactionSequence {
@@ -202,15 +216,16 @@ impl Client {
         let hashes = res
             .sequence_response
             .into_iter()
-            .map(|resp| resp.hash)
-            .collect();
+            .map(|resp| B256::from_str(&resp.hash))
+            .collect::<Result<Vec<B256>, FromHexError>>()
+            .map_err(|e| e.to_string())?;
 
         Ok((hashes, timestamp))
     }
 
     /// Publish an SSZ encoded block to the Fiber Network. Returns [`BlockSubmissionResponse`] which
     /// contains information about the newly published block.
-    pub async fn publish_block(&self, ssz_block: Vec<u8>) -> Result<BlockSubmissionResponse> {
+    pub async fn publish_block(&self, ssz_block: Vec<u8>) -> FiberResult<BlockSubmissionResponse> {
         let (res, rx) = oneshot::channel();
 
         let _ = self.cmd_tx.send(SendType::Block {
@@ -386,7 +401,7 @@ impl Client {
     /// every 2s if the stream fails.
     pub async fn subscribe_new_blob_transactions(
         &self,
-    ) -> impl Stream<Item = BlobTransactionSignedEcRecovered> {
+    ) -> impl Stream<Item = Recovered<Signed<TxEip4844WithSidecar>>> {
         let key = self.key.clone();
         let mut client = self.client.clone();
 
@@ -439,10 +454,7 @@ impl Client {
                             };
 
                             tracing::trace!("Received blob transaction");
-                            let _ = tx.send(BlobTransactionSignedEcRecovered {
-                                signed_transaction: blob_tx,
-                                signer,
-                            });
+                            let _ = tx.send(Recovered::new_unchecked(blob_tx, signer));
                         }
                         Err(e) => {
                             tracing::error!(error = ?e, "Error in blob transaction stream, retrying...");

@@ -3,6 +3,7 @@ use std::{process::Command, str::FromStr};
 use alloy::{
     consensus::{SignableTransaction, Transaction, TxEip1559, TxEnvelope, TxType},
     eips::eip2718::Decodable2718,
+    hex,
     primitives::{b256, Address, PrimitiveSignature, TxHash, TxKind, U256},
     rpc::types::AccessList,
 };
@@ -66,7 +67,7 @@ async fn test_new_blob_transactions() {
     while let Some(tx) = sub.next().await {
         println!(
             "blobs: {}, time since last: {:?}",
-            tx.signed_transaction.tx().sidecar.blobs.len(),
+            tx.tx().tx().sidecar.blobs.len(),
             start.elapsed()
         );
         start = std::time::Instant::now();
@@ -215,11 +216,7 @@ async fn test_send_tx() {
 
     println!("expected: 0x{}", hex::encode(hash.0));
 
-    assert_eq!(
-        tx_hash,
-        format!("0x{}", hex::encode(hash.0)),
-        "Expected same hash"
-    );
+    assert_eq!(tx_hash, hash, "Expected same hash");
 }
 
 #[tokio::test]
