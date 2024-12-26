@@ -4,9 +4,12 @@ version = "0.8.0"
 edition = "2021"
 license = "MIT"
 authors = ["Chainbound <admin@chainbound.io>"]
+rust-version = "1.81"
 
 [dependencies]
-# alloy
+# ethereum
+ethereum-consensus = { git = "https://github.com/ralexstokes/ethereum-consensus", rev = "cf3c404" }
+ethereum_ssz = "0.8.1"
 alloy = { version = "0.8.3", features = [
     "ssz",
     "rlp",
@@ -17,10 +20,6 @@ alloy = { version = "0.8.3", features = [
     "rpc-types-engine",
 ] }
 
-# ethereum
-ethereum-consensus = { git = "https://github.com/ralexstokes/ethereum-consensus", rev = "cf3c404" }
-ethereum_ssz = "0.8.1"
-
 # grpc
 tonic = { version = "0.10", features = ["gzip", "prost"] }
 prost = "0.12"
@@ -29,10 +28,8 @@ prost = "0.12"
 tokio = { version = "1.21.1", features = ["macros", "rt-multi-thread"] }
 tokio-stream = "0.1"
 
-# metrics
-tracing = "0.1"
-
 # extra
+tracing = "0.1"
 thiserror = "2.0.9"
 
 [dev-dependencies]
