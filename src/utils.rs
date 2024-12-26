@@ -6,6 +6,7 @@ use alloy::{
     rpc::types::Withdrawals,
 };
 use tonic::Request;
+use tracing::error;
 
 const CLIENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 const CLIENT_NAME: &str = env!("CARGO_PKG_NAME");
@@ -68,16 +69,18 @@ pub(crate) fn parse_execution_payload_to_block(payload: ExecutionPayload) -> Blo
         let alloy_tx = match TxEnvelope::decode_2718(&mut raw_transaction.as_ref()) {
             Ok(enveloped) => enveloped,
             Err(e) => {
-                tracing::error!("failed to decode tx in block: {}", e);
+                error!("failed to decode tx in block: {}", e);
                 continue;
             }
         };
 
         transactions.push(alloy_tx);
     }
-    let withdrawals = payload
-        .as_v3()
-        .map(|v3| Withdrawals::from(v3.withdrawals().clone()));
+    let withdrawals = match payload {
+        ExecutionPayload::V3(v3) => Some(Withdrawals::from(v3.payload_inner.withdrawals)),
+        ExecutionPayload::V2(v2) => Some(Withdrawals::from(v2.withdrawals)),
+        ExecutionPayload::V1(_) => None,
+    };
 
     Block {
         header,

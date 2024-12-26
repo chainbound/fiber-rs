@@ -32,6 +32,9 @@ tokio-stream = "0.1"
 # metrics
 tracing = "0.1"
 
+# extra
+thiserror = "2.0.9"
+
 [dev-dependencies]
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 

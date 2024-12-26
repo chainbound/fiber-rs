@@ -4,6 +4,7 @@ use alloy::{consensus::TxEnvelope, eips::eip2718::Encodable2718};
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
 use tonic::{transport::Channel, Request};
+use tracing::{debug, error};
 
 use crate::{
     generated::api::{
@@ -17,7 +18,7 @@ use crate::{
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
 #[allow(missing_docs)]
-pub enum SendType {
+pub(crate) enum SendType {
     Transaction {
         tx: TxEnvelope,
         response: oneshot::Sender<TransactionResponse>,
@@ -42,7 +43,7 @@ pub enum SendType {
 
 /// The dispatcher is responsible of handling request / response messages (like sending transactions)
 #[derive(Debug)]
-pub struct Dispatcher {
+pub(crate) struct Dispatcher {
     /// The receiver for the different types of messages that can be sent to the dispatcher
     pub cmd_rx: mpsc::UnboundedReceiver<SendType>,
     /// The API client
@@ -53,7 +54,7 @@ pub struct Dispatcher {
 
 impl Dispatcher {
     /// Consumes the dispatcher and runs the main loop in a background task.
-    pub async fn run(mut self) {
+    pub(crate) async fn run(mut self) {
         let api_key = self.api_key.clone();
         let mut client = self.client;
 
@@ -69,7 +70,7 @@ impl Dispatcher {
             let mut new_tx_responses = match client.send_transaction_v2(req).await {
                 Ok(stream) => stream.into_inner(),
                 Err(e) => {
-                    tracing::error!(error = ?e, "Error in transaction stream, retrying...");
+                    error!(error = ?e, "Error in transaction stream, retrying...");
                     tokio::time::sleep(Duration::from_secs(1)).await;
                     continue;
                 }
@@ -85,7 +86,7 @@ impl Dispatcher {
             let mut new_tx_seq_responses = match client.send_transaction_sequence_v2(req).await {
                 Ok(stream) => stream.into_inner(),
                 Err(e) => {
-                    tracing::error!(error = ?e, "Error in transaction sequence stream, retrying...");
+                    error!(error = ?e, "Error in transaction sequence stream, retrying...");
                     tokio::time::sleep(Duration::from_secs(1)).await;
                     continue;
                 }
@@ -101,13 +102,13 @@ impl Dispatcher {
             let mut new_block_responses = match client.submit_block_stream(req).await {
                 Ok(stream) => stream.into_inner(),
                 Err(e) => {
-                    tracing::error!(error = ?e, "Error in block submission stream, retrying...");
+                    error!(error = ?e, "Error in block submission stream, retrying...");
                     tokio::time::sleep(Duration::from_secs(1)).await;
                     continue;
                 }
             };
 
-            tracing::debug!("All bi-directional streams established. Listening for commands...");
+            debug!("All bi-directional streams established. Listening for commands...");
 
             while let Some(cmd) = self.cmd_rx.recv().await {
                 match cmd {
@@ -118,7 +119,7 @@ impl Dispatcher {
                             .send(TransactionMsg { rlp_transaction })
                             .is_err()
                         {
-                            tracing::error!("Failed sending transaction");
+                            error!("Failed sending transaction");
                             break;
                         }
 
@@ -128,7 +129,7 @@ impl Dispatcher {
                                     let _ = response.send(res);
                                 }
                                 Err(e) => {
-                                    tracing::error!(error = ?e, "Error in response stream, retrying...");
+                                    error!(error = ?e, "Error in response stream, retrying...");
                                     break;
                                 }
                             }
@@ -141,7 +142,7 @@ impl Dispatcher {
                             })
                             .is_err()
                         {
-                            tracing::error!("Failed sending raw transaction");
+                            error!("Failed sending raw transaction");
                             break;
                         }
 
@@ -151,7 +152,7 @@ impl Dispatcher {
                                     let _ = response.send(res);
                                 }
                                 Err(e) => {
-                                    tracing::error!(error = ?e, "Error in response stream, retrying...");
+                                    error!(error = ?e, "Error in response stream, retrying...");
                                     break;
                                 }
                             }
@@ -167,7 +168,7 @@ impl Dispatcher {
                         };
 
                         if new_tx_seq_sender.send(sequence).is_err() {
-                            tracing::error!("Failed sending transaction sequence");
+                            error!("Failed sending transaction sequence");
                             break;
                         }
 
@@ -177,7 +178,7 @@ impl Dispatcher {
                                     let _ = response.send(res);
                                 }
                                 Err(e) => {
-                                    tracing::error!(error = ?e, "Error in response stream, retrying...");
+                                    error!(error = ?e, "Error in response stream, retrying...");
                                     break;
                                 }
                             }
@@ -188,7 +189,7 @@ impl Dispatcher {
                         let sequence = TxSequenceMsgV2 { sequence: raw_txs };
 
                         if new_tx_seq_sender.send(sequence).is_err() {
-                            tracing::error!("Failed sending raw transaction sequence");
+                            error!("Failed sending raw transaction sequence");
                             break;
                         }
 
@@ -198,7 +199,7 @@ impl Dispatcher {
                                     let _ = response.send(res);
                                 }
                                 Err(e) => {
-                                    tracing::error!(error = ?e, "Error in response stream, retrying...");
+                                    error!(error = ?e, "Error in response stream, retrying...");
                                     break;
                                 }
                             }
@@ -207,7 +208,7 @@ impl Dispatcher {
 
                     SendType::Block { msg, response } => {
                         if new_block_sender.send(msg).is_err() {
-                            tracing::error!("Failed sending block");
+                            error!("Failed sending block");
                             break;
                         }
 
@@ -217,7 +218,7 @@ impl Dispatcher {
                                     let _ = response.send(res);
                                 }
                                 Err(e) => {
-                                    tracing::error!(error = ?e, "Error in response stream, retrying...");
+                                    error!(error = ?e, "Error in response stream, retrying...");
                                     break;
                                 }
                             }
