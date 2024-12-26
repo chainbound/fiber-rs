@@ -1,15 +1,25 @@
-use std::time::Duration;
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
-use alloy_rpc_types::Block;
-use alloy_rpc_types_engine::{
-    ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
+use alloy::{
+    consensus::{
+        transaction::{PooledTransaction, Recovered},
+        Block, TxEnvelope,
+    },
+    eips::eip2718::Decodable2718,
+    primitives::{Address, Bytes},
+    rpc::types::engine::{
+        ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
+    },
 };
 use ethereum_consensus::{ssz::prelude::deserialize, types::mainnet::SignedBeaconBlock};
-use reth_primitives::{
-    Address, Bytes, PooledTransactionsElement, TransactionSigned, TransactionSignedEcRecovered,
-};
 use ssz::Decode;
-use tokio::sync::{mpsc, oneshot};
+use tokio::{
+    sync::{mpsc, oneshot},
+    task::JoinHandle,
+};
 use tokio_stream::{wrappers::UnboundedReceiverStream, Stream, StreamExt};
 use tonic::{codec::CompressionEncoding, transport::Channel, Request};
 
@@ -48,6 +58,7 @@ impl ClientOptions {
 }
 
 /// A client for interacting with the Fiber Network.
+///
 /// This wraps the inner [`ApiClient`] and provides a more ergonomic interface, as well as
 /// automatic retries for streams.
 #[derive(Debug)]
@@ -55,6 +66,7 @@ pub struct Client {
     key: String,
     client: ApiClient<Channel>,
     cmd_tx: mpsc::UnboundedSender<SendType>,
+    background_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
 }
 
 impl Client {
@@ -101,6 +113,7 @@ impl Client {
             client,
             key: api_key,
             cmd_tx,
+            background_tasks: Arc::new(Mutex::new(Vec::new())),
         };
 
         tokio::task::spawn(dispatcher.run());
@@ -108,14 +121,23 @@ impl Client {
         Ok(client)
     }
 
+    /// Kills all background tasks spawned by the client.
+    ///
+    /// This is useful when you want to stop all background tasks and clean up resources.
+    /// Note that this will abort all existing streams on this client instance.
+    pub fn kill_all_background_tasks(&self) {
+        for task in self.background_tasks.lock().unwrap().drain(..) {
+            task.abort();
+        }
+    }
+
     /// Broadcasts a signed transaction to the Fiber Network. Returns hash and the timestamp
     /// of when the first node received the transaction.
-    pub async fn send_transaction(&self, tx: TransactionSigned) -> Result<(String, i64)> {
-        let (res, rx) = oneshot::channel();
+    pub async fn send_transaction(&self, tx: TxEnvelope) -> Result<(String, i64)> {
+        let (response, rx) = oneshot::channel();
 
-        let _ = self
-            .cmd_tx
-            .send(SendType::Transaction { tx, response: res });
+        let cmd = SendType::Transaction { tx, response };
+        let _ = self.cmd_tx.send(cmd);
 
         let res = rx.await?;
 
@@ -125,12 +147,10 @@ impl Client {
     /// Broadcasts a raw, RLP-encoded transaction to the Fiber Network. Returns hash and the timestamp
     /// of when the first node received the transaction.
     pub async fn send_raw_transaction(&self, raw_tx: Vec<u8>) -> Result<(String, i64)> {
-        let (res, rx) = oneshot::channel();
+        let (response, rx) = oneshot::channel();
 
-        let _ = self.cmd_tx.send(SendType::RawTransaction {
-            raw_tx,
-            response: res,
-        });
+        let cmd = SendType::RawTransaction { raw_tx, response };
+        let _ = self.cmd_tx.send(cmd);
 
         let res = rx.await?;
 
@@ -141,14 +161,15 @@ impl Client {
     /// the timestamp of when the first node received the sequence.
     pub async fn send_transaction_sequence(
         &self,
-        tx_sequence: Vec<TransactionSigned>,
+        tx_sequence: Vec<TxEnvelope>,
     ) -> Result<(Vec<String>, i64)> {
-        let (res, rx) = oneshot::channel();
+        let (response, rx) = oneshot::channel();
 
-        let _ = self.cmd_tx.send(SendType::TransactionSequence {
+        let cmd = SendType::TransactionSequence {
             msg: tx_sequence,
-            response: res,
-        });
+            response,
+        };
+        let _ = self.cmd_tx.send(cmd);
 
         let res = rx.await?;
 
@@ -200,14 +221,20 @@ impl Client {
         Ok(rx.await?)
     }
 
-    /// Subscribes to new transactions, returning a [`Stream`] of [`TransactionSignedEcRecovered`].
-    /// Uses the given encoded filter to filter transactions. Note: the actual subscription takes place in
-    /// the background. It will automatically retry every 2s if the stream fails.
+    /// Subscribes to new transactions, returning a [`Stream`] of [`RecoveredTx<TxEnvelope>`].
+    /// Uses the given encoded filter to filter transactions.
+    ///
+    /// Note: the actual subscription takes place in the background.
+    /// It will automatically retry every 2s if the stream fails.
+    ///
+    /// Note: don't call this method multiple times, as it will create multiple background tasks
+    /// that will compete for the same stream, resulting in spamming connection requests. If you
+    /// really need to manually restart the stream, call [`Self::kill_all_background_tasks`] first.
     pub async fn subscribe_new_transactions(
         &self,
         filter: Option<Vec<u8>>,
-    ) -> impl Stream<Item = TransactionSignedEcRecovered> {
-        let f = match filter {
+    ) -> impl Stream<Item = Recovered<TxEnvelope>> {
+        let filter = match filter {
             Some(encoded_filter) => TxFilter {
                 encoded: encoded_filter,
             },
@@ -215,17 +242,13 @@ impl Client {
         };
 
         let key = self.key.clone();
-
-        let mut req = Request::new(f.clone());
-        append_metadata(&mut req, &key);
-
         let mut client = self.client.clone();
 
         let (tx, rx) = mpsc::unbounded_channel();
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             loop {
-                let mut req = Request::new(f.clone());
+                let mut req = Request::new(filter.clone());
                 append_metadata(&mut req, &key);
 
                 let mut stream = match client.subscribe_new_txs_v2(req).await {
@@ -250,20 +273,20 @@ impl Client {
                                 }
                             };
 
-                            let signed_transaction = match TransactionSigned::decode_enveloped(
+                            let signed_transaction = match TxEnvelope::decode_2718(
                                 &mut transaction.rlp_transaction.as_slice(),
                             ) {
                                 Ok(tx) => tx,
                                 Err(e) => {
-                                    // HOTFIX: In case we receive a transaction in its network protocol
+                                    // Note: In case we receive a transaction in its network protocol
                                     // encoding, we strip the blob out and try to decode it again.
                                     if e.to_string() == "unexpected list" {
                                         tracing::debug!("Received blob transaction in network protocol encoding");
 
-                                        match PooledTransactionsElement::decode_enveloped(
+                                        match PooledTransaction::decode_2718(
                                             &mut transaction.rlp_transaction.as_ref(),
                                         ) {
-                                            Ok(pooled) => pooled.into_transaction(),
+                                            Ok(pooled) => pooled.into_envelope(),
                                             Err(e) => {
                                                 tracing::error!(error = ?e, "Error deserializing blob transaction");
                                                 continue;
@@ -275,11 +298,9 @@ impl Client {
                                     }
                                 }
                             };
-                            tracing::trace!(hash = ?signed_transaction.hash(), "Received transaction");
-                            let _ = tx.send(TransactionSignedEcRecovered::from_signed_transaction(
-                                signed_transaction,
-                                signer,
-                            ));
+
+                            tracing::trace!(hash = ?signed_transaction.tx_hash(), "Received transaction");
+                            let _ = tx.send(Recovered::new_unchecked(signed_transaction, signer));
                         }
                         Err(e) => {
                             tracing::error!(error = ?e, "Error in transaction stream, retrying...");
@@ -292,6 +313,8 @@ impl Client {
             }
         });
 
+        self.background_tasks.lock().unwrap().push(handle);
+
         UnboundedReceiverStream::new(rx)
     }
 
@@ -302,7 +325,7 @@ impl Client {
         &self,
         filter: Option<Vec<u8>>,
     ) -> impl Stream<Item = (Address, Bytes)> {
-        let f = match filter {
+        let filter = match filter {
             Some(encoded_filter) => TxFilter {
                 encoded: encoded_filter,
             },
@@ -310,17 +333,13 @@ impl Client {
         };
 
         let key = self.key.clone();
-
-        let mut req = Request::new(f.clone());
-        append_metadata(&mut req, &key);
-
         let mut client = self.client.clone();
 
         let (tx, rx) = mpsc::unbounded_channel();
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             loop {
-                let mut req = Request::new(f.clone());
+                let mut req = Request::new(filter.clone());
                 append_metadata(&mut req, &key);
 
                 let mut stream = match client.subscribe_new_txs_v2(req).await {
@@ -357,6 +376,8 @@ impl Client {
             }
         });
 
+        self.background_tasks.lock().unwrap().push(handle);
+
         UnboundedReceiverStream::new(rx)
     }
 
@@ -367,15 +388,11 @@ impl Client {
         &self,
     ) -> impl Stream<Item = BlobTransactionSignedEcRecovered> {
         let key = self.key.clone();
-
-        let mut req = Request::new(());
-        append_metadata(&mut req, &key);
-
         let mut client = self.client.clone();
 
         let (tx, rx) = mpsc::unbounded_channel();
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             loop {
                 let mut req = Request::new(());
                 append_metadata(&mut req, &key);
@@ -402,7 +419,7 @@ impl Client {
                                 }
                             };
 
-                            let pooled = match PooledTransactionsElement::decode_enveloped(
+                            let pooled = match PooledTransaction::decode_2718(
                                 &mut transaction.rlp_transaction.as_ref(),
                             ) {
                                 Ok(pooled) => pooled,
@@ -412,7 +429,7 @@ impl Client {
                                 }
                             };
                             let blob_tx = match pooled {
-                                PooledTransactionsElement::BlobTransaction(blob_tx) => blob_tx,
+                                PooledTransaction::Eip4844(blob_tx) => blob_tx,
                                 _ => {
                                     tracing::error!(
                                         "Wrong transaction type for blob transaction stream"
@@ -421,7 +438,7 @@ impl Client {
                                 }
                             };
 
-                            tracing::trace!(hash = ?blob_tx.hash, "Received blob transaction");
+                            tracing::trace!("Received blob transaction");
                             let _ = tx.send(BlobTransactionSignedEcRecovered {
                                 signed_transaction: blob_tx,
                                 signer,
@@ -438,6 +455,8 @@ impl Client {
             }
         });
 
+        self.background_tasks.lock().unwrap().push(handle);
+
         UnboundedReceiverStream::new(rx)
     }
 
@@ -451,15 +470,11 @@ impl Client {
         &self,
     ) -> impl Stream<Item = (Address, Bytes)> {
         let key = self.key.clone();
-
-        let mut req = Request::new(());
-        append_metadata(&mut req, &key);
-
         let mut client = self.client.clone();
 
         let (tx, rx) = mpsc::unbounded_channel();
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             loop {
                 let mut req = Request::new(());
                 append_metadata(&mut req, &key);
@@ -499,6 +514,8 @@ impl Client {
             }
         });
 
+        self.background_tasks.lock().unwrap().push(handle);
+
         UnboundedReceiverStream::new(rx)
     }
 
@@ -511,16 +528,13 @@ impl Client {
     /// - `parent_beacon_block_root`
     /// - `transactions_root`
     /// - `withdrawals_root`
-    pub async fn subscribe_new_execution_payloads(&self) -> impl Stream<Item = Block> {
+    pub async fn subscribe_new_execution_payloads(&self) -> impl Stream<Item = Block<TxEnvelope>> {
         let key = self.key.clone();
-
-        let mut req = Request::new(());
-        append_metadata(&mut req, &key);
-
         let mut client = self.client.clone();
+
         let (tx, rx) = mpsc::unbounded_channel();
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             loop {
                 let mut req = Request::new(());
                 append_metadata(&mut req, &key);
@@ -585,6 +599,8 @@ impl Client {
             }
         });
 
+        self.background_tasks.lock().unwrap().push(handle);
+
         UnboundedReceiverStream::new(rx)
     }
 
@@ -593,14 +609,11 @@ impl Client {
     /// It will automatically retry every 2s if the stream fails.
     pub async fn subscribe_new_beacon_blocks(&self) -> impl Stream<Item = SignedBeaconBlock> {
         let key = self.key.clone();
-
-        let mut req = Request::new(());
-        append_metadata(&mut req, &key);
-
         let mut client = self.client.clone();
+
         let (tx, rx) = mpsc::unbounded_channel();
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             loop {
                 let mut req = Request::new(());
                 append_metadata(&mut req, &key);
@@ -638,6 +651,8 @@ impl Client {
             }
         });
 
+        self.background_tasks.lock().unwrap().push(handle);
+
         UnboundedReceiverStream::new(rx)
     }
 
@@ -646,14 +661,11 @@ impl Client {
     /// It will automatically retry every 2s if the stream fails.
     pub async fn subscribe_new_raw_beacon_blocks(&self) -> impl Stream<Item = Bytes> {
         let key = self.key.clone();
-
-        let mut req = Request::new(());
-        append_metadata(&mut req, &key);
-
         let mut client = self.client.clone();
+
         let (tx, rx) = mpsc::unbounded_channel();
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             loop {
                 let mut req = Request::new(());
                 append_metadata(&mut req, &key);
@@ -684,6 +696,8 @@ impl Client {
                 }
             }
         });
+
+        self.background_tasks.lock().unwrap().push(handle);
 
         UnboundedReceiverStream::new(rx)
     }

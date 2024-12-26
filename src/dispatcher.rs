@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use reth_primitives::TransactionSigned;
+use alloy::{consensus::TxEnvelope, eips::eip2718::Encodable2718};
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
 use tonic::{transport::Channel, Request};
@@ -19,7 +19,7 @@ use crate::{
 #[allow(missing_docs)]
 pub enum SendType {
     Transaction {
-        tx: TransactionSigned,
+        tx: TxEnvelope,
         response: oneshot::Sender<TransactionResponse>,
     },
     RawTransaction {
@@ -27,7 +27,7 @@ pub enum SendType {
         response: oneshot::Sender<TransactionResponse>,
     },
     TransactionSequence {
-        msg: Vec<TransactionSigned>,
+        msg: Vec<TxEnvelope>,
         response: oneshot::Sender<TxSequenceResponse>,
     },
     RawTransactionSequence {
@@ -112,8 +112,7 @@ impl Dispatcher {
             while let Some(cmd) = self.cmd_rx.recv().await {
                 match cmd {
                     SendType::Transaction { tx, response } => {
-                        let mut rlp_transaction: Vec<u8> = Vec::new();
-                        tx.encode_enveloped(&mut rlp_transaction);
+                        let rlp_transaction = tx.encoded_2718();
 
                         if new_tx_sender
                             .send(TransactionMsg { rlp_transaction })
@@ -158,13 +157,11 @@ impl Dispatcher {
                             }
                         }
                     }
+
                     SendType::TransactionSequence { msg, response } => {
-                        let mut rlp_transactions: Vec<Vec<u8>> = Vec::with_capacity(msg.len());
-                        for tx in msg {
-                            let mut rlp_transaction: Vec<u8> = Vec::new();
-                            tx.encode_enveloped(&mut rlp_transaction);
-                            rlp_transactions.push(rlp_transaction);
-                        }
+                        let rlp_transactions =
+                            msg.into_iter().map(|tx| tx.encoded_2718()).collect();
+
                         let sequence = TxSequenceMsgV2 {
                             sequence: rlp_transactions,
                         };
@@ -186,6 +183,7 @@ impl Dispatcher {
                             }
                         }
                     }
+
                     SendType::RawTransactionSequence { raw_txs, response } => {
                         let sequence = TxSequenceMsgV2 { sequence: raw_txs };
 
@@ -206,6 +204,7 @@ impl Dispatcher {
                             }
                         }
                     }
+
                     SendType::Block { msg, response } => {
                         if new_block_sender.send(msg).is_err() {
                             tracing::error!("Failed sending block");
