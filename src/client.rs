@@ -12,7 +12,7 @@ use alloy::{
     },
     eips::eip2718::Decodable2718,
     hex::FromHexError,
-    primitives::{Address, Bytes, B256},
+    primitives::{Address, Bytes, TxHash, B256},
     rpc::types::engine::{
         ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
     },
@@ -160,7 +160,7 @@ impl Client {
 
     /// Broadcasts a signed transaction to the Fiber Network. Returns hash and the timestamp
     /// of when the first node received the transaction.
-    pub async fn send_transaction(&self, tx: TxEnvelope) -> FiberResult<(B256, i64)> {
+    pub async fn send_transaction(&self, tx: TxEnvelope) -> FiberResult<(TxHash, i64)> {
         let (response, rx) = oneshot::channel();
 
         let cmd = SendType::Transaction { tx, response };
@@ -173,7 +173,7 @@ impl Client {
 
     /// Broadcasts a raw, RLP-encoded transaction to the Fiber Network. Returns hash and the timestamp
     /// of when the first node received the transaction.
-    pub async fn send_raw_transaction(&self, raw_tx: Vec<u8>) -> FiberResult<(B256, i64)> {
+    pub async fn send_raw_transaction(&self, raw_tx: Vec<u8>) -> FiberResult<(TxHash, i64)> {
         let (response, rx) = oneshot::channel();
 
         let cmd = SendType::RawTransaction { raw_tx, response };
@@ -189,7 +189,7 @@ impl Client {
     pub async fn send_transaction_sequence(
         &self,
         tx_sequence: Vec<TxEnvelope>,
-    ) -> FiberResult<(Vec<B256>, i64)> {
+    ) -> FiberResult<(Vec<TxHash>, i64)> {
         let (response, rx) = oneshot::channel();
 
         let cmd = SendType::TransactionSequence {
@@ -215,7 +215,7 @@ impl Client {
     pub async fn send_raw_transaction_sequence(
         &self,
         tx_sequence: Vec<Vec<u8>>,
-    ) -> FiberResult<(Vec<B256>, i64)> {
+    ) -> FiberResult<(Vec<TxHash>, i64)> {
         let (res, rx) = oneshot::channel();
 
         let _ = self.cmd_tx.send(SendType::RawTransactionSequence {
