@@ -51,8 +51,7 @@ If the underlying gRPC stream fails due to connection issues, it will automatica
 
 #### Transactions
 
-Subscribing to transactions will return a `Stream`, yielding [`reth_primitives::TransactionSignedEcRecovered`](https://github.com/paradigmxyz/reth/blob/0e166f0f326b86491c0b23a8cc483e8a224e9731/crates/primitives/src/transaction/mod.rs#L1474)
-for every new transaction that's received.
+Subscribing to transactions will return a `Stream`, yielding [`Recovered<alloy::consensus::TxEnvelope>`](https://docs.rs/alloy/latest/alloy/consensus/transaction/struct.Recovered.html) for every new transaction that's received.
 
 **Note on EIP-4844:** Blob-carrying type 3 transactions are returned by the stream WITHOUT their blobs. The blobs are returned in a separate stream, `subscribe_new_blob_transactions`.
 
@@ -79,7 +78,7 @@ async fn main() {
 
 #### Blob Transactions
 
-Subscribing to blob transactions will return a `Stream`, yielding [`BlobTransactionSignedEcRecovered`](./src/types.rs) for every new blob transaction that's received. This type is a simple wrapper over [reth_primitives::BlobTransaction](https://github.com/paradigmxyz/reth/blob/6863cdb42bbac29de57b66739c8e0fc7b4d5dbaa/crates/primitives/src/transaction/sidecar.rs#L54).
+Subscribing to blob transactions will return a `Stream`, yielding [`Recovered<Signed<TxEip4844WithSidecar>>`](https://docs.rs/alloy/latest/alloy/consensus/struct.TxEip4844WithSidecar.html) for every new blob transaction that's received.
 
 **NOTE:** This stream will ONLY yield blob-carrying transactions with their blobs. To get all transactions, use `subscribe_new_transactions` instead.
 
@@ -178,11 +177,12 @@ Returns a stream of newly seen execution payloads. This is useful for getting th
 newly confirmed block. An `ExecutionPayload` contains both the block header and the transactions
 that were executed in that block.
 
-The type returned by this stream is an [`alloy-rpc-types::Block`](https://github.com/alloy-rs/alloy/blob/a4453d42ffb755a46bace2ceca3baa454e0cd807/crates/rpc-types/src/eth/block.rs#L18). Since the blocks returned are parsed from consensus-layer payloads, they are missing the following fields, which are set to `None` or `zero` in all returned stream items:
+The type returned by this stream is an [`alloy-consensus::Block<TxEnvelope>`](https://docs.rs/alloy/latest/alloy/consensus/struct.Block.html). Since the blocks returned are parsed from consensus-layer payloads, they are missing the following fields, which are set to `None` or `zero` in all returned stream items:
 
 - `parent_beacon_block_root`
 - `transactions_root`
 - `withdrawals_root`
+- `requests_hash`
 
 **Example:**
 
@@ -259,10 +259,14 @@ async fn main() {
 
 #### `send_transaction`
 
-Allows to broadcast transactions quickly to the Fiber network. It expects a [`reth_primitives::TransactionSigned`](https://github.com/paradigmxyz/reth/blob/0e166f0f326b86491c0b23a8cc483e8a224e9731/crates/primitives/src/transaction/mod.rs#L947) object, and returns the transaction hash and the timestamp of when the first Fiber node received it.
+Allows to broadcast transactions quickly to the Fiber network. It expects a [`alloy::consensus::TxEnvelope`](https://docs.rs/alloy/latest/alloy/consensus/enum.TxEnvelope.html) object, and returns the transaction hash and the timestamp of when the first Fiber node received it.
 
 ```rs
-use reth_primitives::{Transaction, TxEip1559, Address, TransactionKind, AccessList, Signature, U256, TransactionSigned};
+use alloy::{
+    consensus::{TxEip1559, TxEnvelope},
+    primitives::{b256, Address, PrimitiveSignature, TxKind, U256},
+    hex,
+};
 use fiber::Client;
 
 #[tokio::main]
@@ -270,27 +274,25 @@ async fn main() {
     let mut client = Client::connect("ENDPOINT_URL", "API_KEY").await.unwrap();
 
     // Create a transaction and a signature for it
-    let tx = Transaction::Eip1559(TxEip1559 {
+    let tx = TxEip1559 {
         chain_id: 1,
             nonce: 0x42,
             gas_limit: 44386,
-            to: TransactionKind::Call( Address::from_str("0x6069a6c32cf691f5982febae4faf8a6f3ab2f0f6").unwrap()),
-            value: 0_u64.into(),
+            to: TxKind::Call( Address::from_str("0x6069a6c32cf691f5982febae4faf8a6f3ab2f0f6").unwrap()),
+            value: U256::from(0),
             input:  hex::decode("a22cb4650000000000000000000000005eee75727d804a2b13038928d36f8b188945a57a0000000000000000000000000000000000000000000000000000000000000000").unwrap().into(),
             max_fee_per_gas: 0x4a817c800,
             max_priority_fee_per_gas: 0x3b9aca00,
             access_list: AccessList::default(),
-    });
-
-    let sig = Signature {
-        r: U256::from_str("0x840cfc572845f5786e702984c2a582528cad4b49b2a10b9db1be7fca90058565")
-            .unwrap(),
-        s: U256::from_str("0x25e7109ceb98168d95b09b18bbf6b685130e0562f233877d492b94eee0c5b6d1")
-            .unwrap(),
-        odd_y_parity: false,
     };
 
-    let signed_tx = TransactionSigned::from_transaction_and_signature(tx, sig);
+    let sig = PrimitiveSignature::from_scalars_and_parity(
+        b256!("840cfc572845f5786e702984c2a582528cad4b49b2a10b9db1be7fca90058565"),
+        b256!("25e7109ceb98168d95b09b18bbf6b685130e0562f233877d492b94eee0c5b6d1"),
+        false,
+    );
+
+    let signed_tx = TxEnvelope::from(tx.into_signed(sig));
 
     let res = client.send_transaction(signed_tx).await.unwrap();
 
@@ -303,7 +305,12 @@ async fn main() {
 Sends a sequence of transactions to the Fiber network at once.
 
 ```rs
-use reth_primitives::{Transaction, TxEip1559, Address, TransactionKind, AccessList, Signature, U256, TransactionSigned};
+use alloy::{
+    consensus::{TxEip1559, TxEnvelope},
+    eips::eip2718::Decodable2718,
+    primitives::{b256, Address, PrimitiveSignature, TxKind, U256},
+    hex,
+};
 use std::str::FromStr;
 use fiber::Client;
 
@@ -312,31 +319,30 @@ async fn main() {
     let mut client = Client::connect("ENDPOINT_URL", "API_KEY").await.unwrap();
 
     // Provide a transaction with signature as the first transaction of the sequence
-    let tx = Transaction::Eip1559(TxEip1559 {
+let tx = TxEip1559 {
         chain_id: 1,
             nonce: 0x42,
             gas_limit: 44386,
-            to: TransactionKind::Call( Address::from_str("0x6069a6c32cf691f5982febae4faf8a6f3ab2f0f6").unwrap()),
-            value: 0_u64.into(),
+            to: TxKind::Call( Address::from_str("0x6069a6c32cf691f5982febae4faf8a6f3ab2f0f6").unwrap()),
+            value: U256::from(0),
             input:  hex::decode("a22cb4650000000000000000000000005eee75727d804a2b13038928d36f8b188945a57a0000000000000000000000000000000000000000000000000000000000000000").unwrap().into(),
             max_fee_per_gas: 0x4a817c800,
             max_priority_fee_per_gas: 0x3b9aca00,
             access_list: AccessList::default(),
-    });
-
-    let sig = Signature {
-        r: U256::from_str("0x840cfc572845f5786e702984c2a582528cad4b49b2a10b9db1be7fca90058565")
-            .unwrap(),
-        s: U256::from_str("0x25e7109ceb98168d95b09b18bbf6b685130e0562f233877d492b94eee0c5b6d1")
-            .unwrap(),
-        odd_y_parity: false,
     };
 
-    let signed_tx_1 = TransactionSigned::from_transaction_and_signature(tx, sig);
+    let sig = PrimitiveSignature::from_scalars_and_parity(
+        b256!("840cfc572845f5786e702984c2a582528cad4b49b2a10b9db1be7fca90058565"),
+        b256!("25e7109ceb98168d95b09b18bbf6b685130e0562f233877d492b94eee0c5b6d1"),
+        false,
+    );
+
+
+    let signed_tx_1 = TxEnvelope::from(tx.into_signed(sig));
 
     // Then, provide a second signed transaction from wherever you want
     let tx_bytes = hex::decode("02f872018307910d808507204d2cb1827d0094388c818ca8b9251b393131c08a736a67ccb19297880320d04823e2701c80c001a0cf024f4815304df2867a1a74e9d2707b6abda0337d2d54a4438d453f4160f190a07ac0e6b3bc9395b5b9c8b9e6d77204a236577a5b18467b9175c01de4faa208d9").unwrap();
-    let signed_tx_2 = TransactionSigned::decode_enveloped(&mut &tx_bytes[..]).unwrap();
+    let signed_tx_2 = TxEnvelope::decode_2718(tx_bytes).unwrap();
 
     let res = client.send_transaction_sequence(vec![signed_tx_1, signed_tx_2]).await.unwrap();
 

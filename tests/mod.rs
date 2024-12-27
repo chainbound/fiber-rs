@@ -1,12 +1,16 @@
 use std::{process::Command, str::FromStr};
 
-use ethereum_consensus::{ssz::prelude::deserialize, types::mainnet::SignedBeaconBlock};
-use fiber::Client;
-use reth_primitives::{
-    AccessList, Address, Signature, Transaction, TransactionSigned, TxEip1559, TxHash, TxKind,
-    TxType, B256, U256,
+use alloy::{
+    consensus::{SignableTransaction, Transaction, TxEip1559, TxEnvelope, TxType},
+    eips::eip2718::Decodable2718,
+    hex,
+    primitives::{b256, Address, PrimitiveSignature, TxHash, TxKind, U256},
+    rpc::types::AccessList,
 };
+use ethereum_consensus::{ssz::prelude::deserialize, types::mainnet::SignedBeaconBlock};
 use tokio_stream::StreamExt;
+
+use fiber::Client;
 
 mod decode;
 
@@ -36,7 +40,7 @@ async fn test_new_type_3_transactions() {
     let mut i = 0;
     while let Some(tx) = sub.next().await {
         if tx.tx_type() == TxType::Eip4844 {
-            println!("blob tx: {}", tx.hash());
+            println!("blob tx: {}", tx.tx_hash());
             println!("blob hashes: {:?}", tx.blob_versioned_hashes());
 
             i += 1;
@@ -62,9 +66,8 @@ async fn test_new_blob_transactions() {
     let mut i = 0;
     while let Some(tx) = sub.next().await {
         println!(
-            "blob tx: {:?}, blobs: {}, time since last: {:?}",
-            tx.signed_transaction.hash,
-            tx.signed_transaction.sidecar.blobs.len(),
+            "blobs: {}, time since last: {:?}",
+            tx.tx().tx().sidecar.blobs.len(),
             start.elapsed()
         );
         start = std::time::Instant::now();
@@ -116,9 +119,9 @@ async fn test_new_payloads() {
     while let Some(block) = sub.next().await {
         println!(
             "block num: {}, txs: {}, block hash: {}",
-            block.header.number.unwrap(),
-            block.transactions.len(),
-            block.header.hash.unwrap()
+            block.header.number,
+            block.body.transactions.len(),
+            block.header.hash_slow()
         );
         i += 1;
 
@@ -178,10 +181,9 @@ async fn test_send_tx() {
     };
 
     let signer = Address::from_str("0xdd6b8b3dc6b7ad97db52f08a275ff4483e024cea").unwrap();
-    let hash =
-        B256::from_str("0ec0b6a2df4d87424e5f6ad2a654e27aaeb7dac20ae9e8385cc09087ad532ee0").unwrap();
+    let hash = b256!("0ec0b6a2df4d87424e5f6ad2a654e27aaeb7dac20ae9e8385cc09087ad532ee0");
 
-    let tx = Transaction::Eip1559(TxEip1559 {
+    let tx = TxEip1559 {
         chain_id: 1,
             nonce: 0x42,
             gas_limit: 44386,
@@ -191,24 +193,22 @@ async fn test_send_tx() {
             max_fee_per_gas: 0x4a817c800,
             max_priority_fee_per_gas: 0x3b9aca00,
             access_list: AccessList::default(),
-    });
-
-    let sig = Signature {
-        r: U256::from_str("0x840cfc572845f5786e702984c2a582528cad4b49b2a10b9db1be7fca90058565")
-            .unwrap(),
-        s: U256::from_str("0x25e7109ceb98168d95b09b18bbf6b685130e0562f233877d492b94eee0c5b6d1")
-            .unwrap(),
-        odd_y_parity: false,
     };
 
-    let signed_tx = TransactionSigned::from_transaction_and_signature(tx, sig);
-
-    assert_eq!(signed_tx.hash(), hash, "Expected same hash");
-    assert_eq!(
-        signed_tx.recover_signer(),
-        Some(signer),
-        "Recovering signer should pass."
+    let sig = PrimitiveSignature::from_scalars_and_parity(
+        b256!("840cfc572845f5786e702984c2a582528cad4b49b2a10b9db1be7fca90058565"),
+        b256!("25e7109ceb98168d95b09b18bbf6b685130e0562f233877d492b94eee0c5b6d1"),
+        false,
     );
+
+    let signed_tx = TxEnvelope::from(tx.into_signed(sig));
+
+    assert_eq!(
+        signed_tx.recover_signer().unwrap(),
+        signer,
+        "Expected same signer"
+    );
+    assert_eq!(*signed_tx.tx_hash(), hash, "Expected same hash");
 
     let (tx_hash, timestamp) = client.send_transaction(signed_tx).await.unwrap();
     println!("tx_hash: {}", tx_hash);
@@ -216,19 +216,16 @@ async fn test_send_tx() {
 
     println!("expected: 0x{}", hex::encode(hash.0));
 
-    assert_eq!(
-        tx_hash,
-        format!("0x{}", hex::encode(hash.0)),
-        "Expected same hash"
-    );
+    assert_eq!(tx_hash, hash, "Expected same hash");
 }
 
 #[tokio::test]
 async fn test_decode_transaction_rlp() {
     let tx_bytes = hex::decode("02f872018307910d808507204d2cb1827d0094388c818ca8b9251b393131c08a736a67ccb19297880320d04823e2701c80c001a0cf024f4815304df2867a1a74e9d2707b6abda0337d2d54a4438d453f4160f190a07ac0e6b3bc9395b5b9c8b9e6d77204a236577a5b18467b9175c01de4faa208d9").unwrap();
-    let decoded = TransactionSigned::decode_enveloped(&mut &tx_bytes[..]).unwrap();
+    let decoded = TxEnvelope::decode_2718(&mut tx_bytes.as_ref()).unwrap();
+
     assert_eq!(
-        decoded.hash(),
+        *decoded.tx_hash(),
         TxHash::from_str("0x86718885c4b4218c6af87d3d0b0d83e3cc465df2a05c048aa4db9f1a6f9de91f")
             .unwrap()
     );

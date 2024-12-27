@@ -1,30 +1,56 @@
-use std::time::Duration;
+use std::{
+    fmt::Debug,
+    str::FromStr,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
-use alloy_rpc_types::Block;
-use alloy_rpc_types_engine::{
-    ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
+use alloy::{
+    consensus::{
+        transaction::{PooledTransaction, Recovered},
+        Block, Signed, TxEip4844WithSidecar, TxEnvelope,
+    },
+    eips::eip2718::Decodable2718,
+    hex::FromHexError,
+    primitives::{Address, Bytes, TxHash, B256},
+    rpc::types::engine::{
+        ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
+    },
 };
 use ethereum_consensus::{ssz::prelude::deserialize, types::mainnet::SignedBeaconBlock};
-use reth_primitives::{
-    Address, Bytes, PooledTransactionsElement, TransactionSigned, TransactionSignedEcRecovered,
-};
 use ssz::Decode;
-use tokio::sync::{mpsc, oneshot};
+use tokio::{
+    sync::{mpsc, oneshot},
+    task::JoinHandle,
+};
 use tokio_stream::{wrappers::UnboundedReceiverStream, Stream, StreamExt};
 use tonic::{codec::CompressionEncoding, transport::Channel, Request};
+use tracing::{debug, error, info, trace};
 
 use crate::generated::api::{
     api_client::ApiClient, BlockSubmissionMsg, BlockSubmissionResponse, TxFilter,
 };
-use crate::types::BlobTransactionSignedEcRecovered;
 use crate::utils::{append_metadata, parse_execution_payload_to_block};
 use crate::{Dispatcher, SendType};
-
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 const BELLATRIX_DATA_VERSION: u32 = 3;
 const CAPELLA_DATA_VERSION: u32 = 4;
 const DENEB_DATA_VERSION: u32 = 5;
+
+/// Error type for the Fiber client.
+#[derive(Debug, thiserror::Error)]
+#[allow(missing_docs)]
+pub enum FiberError {
+    #[error("Tonic transport error: {0}")]
+    Tonic(#[from] tonic::transport::Error),
+    #[error("Error while parsing hex: {0}")]
+    Hex(#[from] FromHexError),
+    #[error("Error when receiving on a channel: {0}")]
+    Recv(#[from] tokio::sync::oneshot::error::RecvError),
+}
+
+/// Result type for the Fiber client.
+pub(crate) type FiberResult<T> = std::result::Result<T, FiberError>;
 
 /// Options for the API client
 #[derive(Debug, Default, Clone, Copy)]
@@ -48,18 +74,31 @@ impl ClientOptions {
 }
 
 /// A client for interacting with the Fiber Network.
+///
 /// This wraps the inner [`ApiClient`] and provides a more ergonomic interface, as well as
 /// automatic retries for streams.
-#[derive(Debug)]
 pub struct Client {
     key: String,
     client: ApiClient<Channel>,
     cmd_tx: mpsc::UnboundedSender<SendType>,
+    background_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
+}
+
+impl Debug for Client {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Client")
+            .field("key", &"********")
+            .field("client", &self.client)
+            .finish()
+    }
 }
 
 impl Client {
     /// Connects to the given gRPC target with the API key, returning a [`Client`] instance.
-    pub async fn connect(target: impl Into<String>, api_key: impl Into<String>) -> Result<Client> {
+    pub async fn connect(
+        target: impl Into<String>,
+        api_key: impl Into<String>,
+    ) -> FiberResult<Client> {
         Self::connect_with_options(target, api_key, ClientOptions::default()).await
     }
 
@@ -68,7 +107,7 @@ impl Client {
         target: impl Into<String>,
         api_key: impl Into<String>,
         opts: ClientOptions,
-    ) -> Result<Client> {
+    ) -> FiberResult<Client> {
         let target = target.into();
         let api_key = api_key.into();
 
@@ -101,6 +140,7 @@ impl Client {
             client,
             key: api_key,
             cmd_tx,
+            background_tasks: Arc::new(Mutex::new(Vec::new())),
         };
 
         tokio::task::spawn(dispatcher.run());
@@ -108,47 +148,55 @@ impl Client {
         Ok(client)
     }
 
+    /// Kills all background tasks spawned by the client.
+    ///
+    /// This is useful when you want to stop all background tasks and clean up resources.
+    /// Note that this will abort all existing streams on this client instance.
+    pub fn kill_all_background_tasks(&self) {
+        for task in self.background_tasks.lock().unwrap().drain(..) {
+            task.abort();
+        }
+    }
+
     /// Broadcasts a signed transaction to the Fiber Network. Returns hash and the timestamp
     /// of when the first node received the transaction.
-    pub async fn send_transaction(&self, tx: TransactionSigned) -> Result<(String, i64)> {
-        let (res, rx) = oneshot::channel();
+    pub async fn send_transaction(&self, tx: TxEnvelope) -> FiberResult<(TxHash, i64)> {
+        let (response, rx) = oneshot::channel();
 
-        let _ = self
-            .cmd_tx
-            .send(SendType::Transaction { tx, response: res });
+        let cmd = SendType::Transaction { tx, response };
+        let _ = self.cmd_tx.send(cmd);
 
         let res = rx.await?;
 
-        Ok((res.hash.to_owned(), res.timestamp))
+        Ok((B256::from_str(&res.hash)?, res.timestamp))
     }
 
     /// Broadcasts a raw, RLP-encoded transaction to the Fiber Network. Returns hash and the timestamp
     /// of when the first node received the transaction.
-    pub async fn send_raw_transaction(&self, raw_tx: Vec<u8>) -> Result<(String, i64)> {
-        let (res, rx) = oneshot::channel();
+    pub async fn send_raw_transaction(&self, raw_tx: Vec<u8>) -> FiberResult<(TxHash, i64)> {
+        let (response, rx) = oneshot::channel();
 
-        let _ = self.cmd_tx.send(SendType::RawTransaction {
-            raw_tx,
-            response: res,
-        });
+        let cmd = SendType::RawTransaction { raw_tx, response };
+        let _ = self.cmd_tx.send(cmd);
 
         let res = rx.await?;
 
-        Ok((res.hash.to_owned(), res.timestamp))
+        Ok((B256::from_str(&res.hash)?, res.timestamp))
     }
 
     /// Broadcasts a signed transaction sequence to the Fiber Network. Returns the array of hashes and
     /// the timestamp of when the first node received the sequence.
     pub async fn send_transaction_sequence(
         &self,
-        tx_sequence: Vec<TransactionSigned>,
-    ) -> Result<(Vec<String>, i64)> {
-        let (res, rx) = oneshot::channel();
+        tx_sequence: Vec<TxEnvelope>,
+    ) -> FiberResult<(Vec<TxHash>, i64)> {
+        let (response, rx) = oneshot::channel();
 
-        let _ = self.cmd_tx.send(SendType::TransactionSequence {
+        let cmd = SendType::TransactionSequence {
             msg: tx_sequence,
-            response: res,
-        });
+            response,
+        };
+        let _ = self.cmd_tx.send(cmd);
 
         let res = rx.await?;
 
@@ -156,8 +204,8 @@ impl Client {
         let hashes = res
             .sequence_response
             .into_iter()
-            .map(|resp| resp.hash)
-            .collect();
+            .map(|resp| B256::from_str(&resp.hash))
+            .collect::<Result<Vec<B256>, FromHexError>>()?;
 
         Ok((hashes, timestamp))
     }
@@ -167,7 +215,7 @@ impl Client {
     pub async fn send_raw_transaction_sequence(
         &self,
         tx_sequence: Vec<Vec<u8>>,
-    ) -> Result<(Vec<String>, i64)> {
+    ) -> FiberResult<(Vec<TxHash>, i64)> {
         let (res, rx) = oneshot::channel();
 
         let _ = self.cmd_tx.send(SendType::RawTransactionSequence {
@@ -181,15 +229,15 @@ impl Client {
         let hashes = res
             .sequence_response
             .into_iter()
-            .map(|resp| resp.hash)
-            .collect();
+            .map(|resp| B256::from_str(&resp.hash))
+            .collect::<Result<Vec<B256>, FromHexError>>()?;
 
         Ok((hashes, timestamp))
     }
 
     /// Publish an SSZ encoded block to the Fiber Network. Returns [`BlockSubmissionResponse`] which
     /// contains information about the newly published block.
-    pub async fn publish_block(&self, ssz_block: Vec<u8>) -> Result<BlockSubmissionResponse> {
+    pub async fn publish_block(&self, ssz_block: Vec<u8>) -> FiberResult<BlockSubmissionResponse> {
         let (res, rx) = oneshot::channel();
 
         let _ = self.cmd_tx.send(SendType::Block {
@@ -200,14 +248,20 @@ impl Client {
         Ok(rx.await?)
     }
 
-    /// Subscribes to new transactions, returning a [`Stream`] of [`TransactionSignedEcRecovered`].
-    /// Uses the given encoded filter to filter transactions. Note: the actual subscription takes place in
-    /// the background. It will automatically retry every 2s if the stream fails.
+    /// Subscribes to new transactions, returning a [`Stream`] of [`RecoveredTx<TxEnvelope>`].
+    /// Uses the given encoded filter to filter transactions.
+    ///
+    /// Note: the actual subscription takes place in the background.
+    /// It will automatically retry every 2s if the stream fails.
+    ///
+    /// Note: don't call this method multiple times, as it will create multiple background tasks
+    /// that will compete for the same stream, resulting in spamming connection requests. If you
+    /// really need to manually restart the stream, call [`Self::kill_all_background_tasks`] first.
     pub async fn subscribe_new_transactions(
         &self,
         filter: Option<Vec<u8>>,
-    ) -> impl Stream<Item = TransactionSignedEcRecovered> {
-        let f = match filter {
+    ) -> impl Stream<Item = Recovered<TxEnvelope>> {
+        let filter = match filter {
             Some(encoded_filter) => TxFilter {
                 encoded: encoded_filter,
             },
@@ -215,29 +269,25 @@ impl Client {
         };
 
         let key = self.key.clone();
-
-        let mut req = Request::new(f.clone());
-        append_metadata(&mut req, &key);
-
         let mut client = self.client.clone();
 
         let (tx, rx) = mpsc::unbounded_channel();
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             loop {
-                let mut req = Request::new(f.clone());
+                let mut req = Request::new(filter.clone());
                 append_metadata(&mut req, &key);
 
                 let mut stream = match client.subscribe_new_txs_v2(req).await {
                     Ok(stream) => stream.into_inner(),
                     Err(e) => {
-                        tracing::error!(error = ?e, "Error in transaction stream, retrying...");
+                        error!(error = ?e, "Error in transaction stream, retrying...");
                         tokio::time::sleep(Duration::from_secs(2)).await;
                         continue;
                     }
                 };
 
-                tracing::info!("Transaction stream established");
+                info!("Transaction stream established");
 
                 while let Some(item) = stream.next().await {
                     match item {
@@ -245,44 +295,42 @@ impl Client {
                             let signer = match Address::try_from(transaction.sender.as_slice()) {
                                 Ok(sender) => sender,
                                 Err(e) => {
-                                    tracing::error!(error = ?e, "Error deserializing sender");
+                                    error!(error = ?e, "Error deserializing sender");
                                     continue;
                                 }
                             };
 
-                            let signed_transaction = match TransactionSigned::decode_enveloped(
+                            let signed_transaction = match TxEnvelope::decode_2718(
                                 &mut transaction.rlp_transaction.as_slice(),
                             ) {
                                 Ok(tx) => tx,
                                 Err(e) => {
-                                    // HOTFIX: In case we receive a transaction in its network protocol
+                                    // Note: In case we receive a transaction in its network protocol
                                     // encoding, we strip the blob out and try to decode it again.
                                     if e.to_string() == "unexpected list" {
-                                        tracing::debug!("Received blob transaction in network protocol encoding");
+                                        debug!("Received blob transaction in network protocol encoding");
 
-                                        match PooledTransactionsElement::decode_enveloped(
+                                        match PooledTransaction::decode_2718(
                                             &mut transaction.rlp_transaction.as_ref(),
                                         ) {
-                                            Ok(pooled) => pooled.into_transaction(),
+                                            Ok(pooled) => pooled.into_envelope(),
                                             Err(e) => {
-                                                tracing::error!(error = ?e, "Error deserializing blob transaction");
+                                                error!(error = ?e, "Error deserializing blob transaction");
                                                 continue;
                                             }
                                         }
                                     } else {
-                                        tracing::error!(error = ?e, "Error deserializing transaction");
+                                        error!(error = ?e, "Error deserializing transaction");
                                         continue;
                                     }
                                 }
                             };
-                            tracing::trace!(hash = ?signed_transaction.hash(), "Received transaction");
-                            let _ = tx.send(TransactionSignedEcRecovered::from_signed_transaction(
-                                signed_transaction,
-                                signer,
-                            ));
+
+                            trace!(hash = ?signed_transaction.tx_hash(), "Received transaction");
+                            let _ = tx.send(Recovered::new_unchecked(signed_transaction, signer));
                         }
                         Err(e) => {
-                            tracing::error!(error = ?e, "Error in transaction stream, retrying...");
+                            error!(error = ?e, "Error in transaction stream, retrying...");
                             // If we get an error, we set the inner stream to None and break out of the loop.
                             // Next iteration will retry the stream.
                             break;
@@ -291,6 +339,8 @@ impl Client {
                 }
             }
         });
+
+        self.background_tasks.lock().unwrap().push(handle);
 
         UnboundedReceiverStream::new(rx)
     }
@@ -302,7 +352,7 @@ impl Client {
         &self,
         filter: Option<Vec<u8>>,
     ) -> impl Stream<Item = (Address, Bytes)> {
-        let f = match filter {
+        let filter = match filter {
             Some(encoded_filter) => TxFilter {
                 encoded: encoded_filter,
             },
@@ -310,29 +360,25 @@ impl Client {
         };
 
         let key = self.key.clone();
-
-        let mut req = Request::new(f.clone());
-        append_metadata(&mut req, &key);
-
         let mut client = self.client.clone();
 
         let (tx, rx) = mpsc::unbounded_channel();
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             loop {
-                let mut req = Request::new(f.clone());
+                let mut req = Request::new(filter.clone());
                 append_metadata(&mut req, &key);
 
                 let mut stream = match client.subscribe_new_txs_v2(req).await {
                     Ok(stream) => stream.into_inner(),
                     Err(e) => {
-                        tracing::error!(error = ?e, "Error in transaction stream, retrying...");
+                        error!(error = ?e, "Error in transaction stream, retrying...");
                         tokio::time::sleep(Duration::from_secs(2)).await;
                         continue;
                     }
                 };
 
-                tracing::info!("Raw transaction stream established");
+                info!("Raw transaction stream established");
 
                 while let Some(item) = stream.next().await {
                     match item {
@@ -340,14 +386,14 @@ impl Client {
                             let sender = match Address::try_from(transaction.sender.as_slice()) {
                                 Ok(sender) => sender,
                                 Err(e) => {
-                                    tracing::error!(error = ?e, "Error deserializing sender");
+                                    error!(error = ?e, "Error deserializing sender");
                                     continue;
                                 }
                             };
                             let _ = tx.send((sender, transaction.rlp_transaction.into()));
                         }
                         Err(e) => {
-                            tracing::error!(error = ?e, "Error in transaction stream, retrying...");
+                            error!(error = ?e, "Error in transaction stream, retrying...");
                             // If we get an error, we set the inner stream to None and break out of the loop.
                             // Next iteration will retry the stream.
                             break;
@@ -356,6 +402,8 @@ impl Client {
                 }
             }
         });
+
+        self.background_tasks.lock().unwrap().push(handle);
 
         UnboundedReceiverStream::new(rx)
     }
@@ -365,17 +413,13 @@ impl Client {
     /// every 2s if the stream fails.
     pub async fn subscribe_new_blob_transactions(
         &self,
-    ) -> impl Stream<Item = BlobTransactionSignedEcRecovered> {
+    ) -> impl Stream<Item = Recovered<Signed<TxEip4844WithSidecar>>> {
         let key = self.key.clone();
-
-        let mut req = Request::new(());
-        append_metadata(&mut req, &key);
-
         let mut client = self.client.clone();
 
         let (tx, rx) = mpsc::unbounded_channel();
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             loop {
                 let mut req = Request::new(());
                 append_metadata(&mut req, &key);
@@ -383,13 +427,13 @@ impl Client {
                 let mut stream = match client.subscribe_new_blob_txs(req).await {
                     Ok(stream) => stream.into_inner(),
                     Err(e) => {
-                        tracing::error!(error = ?e, "Error in transaction stream, retrying...");
+                        error!(error = ?e, "Error in transaction stream, retrying...");
                         tokio::time::sleep(Duration::from_secs(2)).await;
                         continue;
                     }
                 };
 
-                tracing::info!("Blob transaction stream established");
+                info!("Blob transaction stream established");
 
                 while let Some(item) = stream.next().await {
                     match item {
@@ -397,38 +441,33 @@ impl Client {
                             let signer = match Address::try_from(transaction.sender.as_slice()) {
                                 Ok(sender) => sender,
                                 Err(e) => {
-                                    tracing::error!(error = ?e, "Error deserializing sender");
+                                    error!(error = ?e, "Error deserializing sender");
                                     continue;
                                 }
                             };
 
-                            let pooled = match PooledTransactionsElement::decode_enveloped(
+                            let pooled = match PooledTransaction::decode_2718(
                                 &mut transaction.rlp_transaction.as_ref(),
                             ) {
                                 Ok(pooled) => pooled,
                                 Err(e) => {
-                                    tracing::error!(error = ?e, "Error deserializing blob transaction");
+                                    error!(error = ?e, "Error deserializing blob transaction");
                                     continue;
                                 }
                             };
                             let blob_tx = match pooled {
-                                PooledTransactionsElement::BlobTransaction(blob_tx) => blob_tx,
+                                PooledTransaction::Eip4844(blob_tx) => blob_tx,
                                 _ => {
-                                    tracing::error!(
-                                        "Wrong transaction type for blob transaction stream"
-                                    );
+                                    error!("Wrong transaction type for blob transaction stream");
                                     continue;
                                 }
                             };
 
-                            tracing::trace!(hash = ?blob_tx.hash, "Received blob transaction");
-                            let _ = tx.send(BlobTransactionSignedEcRecovered {
-                                signed_transaction: blob_tx,
-                                signer,
-                            });
+                            trace!("Received blob transaction");
+                            let _ = tx.send(Recovered::new_unchecked(blob_tx, signer));
                         }
                         Err(e) => {
-                            tracing::error!(error = ?e, "Error in blob transaction stream, retrying...");
+                            error!(error = ?e, "Error in blob transaction stream, retrying...");
                             // If we get an error, we set the inner stream to None and break out of the loop.
                             // Next iteration will retry the stream.
                             break;
@@ -437,6 +476,8 @@ impl Client {
                 }
             }
         });
+
+        self.background_tasks.lock().unwrap().push(handle);
 
         UnboundedReceiverStream::new(rx)
     }
@@ -451,15 +492,11 @@ impl Client {
         &self,
     ) -> impl Stream<Item = (Address, Bytes)> {
         let key = self.key.clone();
-
-        let mut req = Request::new(());
-        append_metadata(&mut req, &key);
-
         let mut client = self.client.clone();
 
         let (tx, rx) = mpsc::unbounded_channel();
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             loop {
                 let mut req = Request::new(());
                 append_metadata(&mut req, &key);
@@ -467,13 +504,13 @@ impl Client {
                 let mut stream = match client.subscribe_new_blob_txs(req).await {
                     Ok(stream) => stream.into_inner(),
                     Err(e) => {
-                        tracing::error!(error = ?e, "Error in transaction stream, retrying...");
+                        error!(error = ?e, "Error in transaction stream, retrying...");
                         tokio::time::sleep(Duration::from_secs(2)).await;
                         continue;
                     }
                 };
 
-                tracing::info!("Raw blob transaction stream established");
+                info!("Raw blob transaction stream established");
 
                 while let Some(item) = stream.next().await {
                     match item {
@@ -481,7 +518,7 @@ impl Client {
                             let signer = match Address::try_from(transaction.sender.as_slice()) {
                                 Ok(sender) => sender,
                                 Err(e) => {
-                                    tracing::error!(error = ?e, "Error deserializing sender");
+                                    error!(error = ?e, "Error deserializing sender");
                                     continue;
                                 }
                             };
@@ -489,7 +526,7 @@ impl Client {
                             let _ = tx.send((signer, transaction.rlp_transaction.into()));
                         }
                         Err(e) => {
-                            tracing::error!(error = ?e, "Error in blob transaction stream, retrying...");
+                            error!(error = ?e, "Error in blob transaction stream, retrying...");
                             // If we get an error, we set the inner stream to None and break out of the loop.
                             // Next iteration will retry the stream.
                             break;
@@ -498,6 +535,8 @@ impl Client {
                 }
             }
         });
+
+        self.background_tasks.lock().unwrap().push(handle);
 
         UnboundedReceiverStream::new(rx)
     }
@@ -511,16 +550,13 @@ impl Client {
     /// - `parent_beacon_block_root`
     /// - `transactions_root`
     /// - `withdrawals_root`
-    pub async fn subscribe_new_execution_payloads(&self) -> impl Stream<Item = Block> {
+    pub async fn subscribe_new_execution_payloads(&self) -> impl Stream<Item = Block<TxEnvelope>> {
         let key = self.key.clone();
-
-        let mut req = Request::new(());
-        append_metadata(&mut req, &key);
-
         let mut client = self.client.clone();
+
         let (tx, rx) = mpsc::unbounded_channel();
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             loop {
                 let mut req = Request::new(());
                 append_metadata(&mut req, &key);
@@ -528,13 +564,13 @@ impl Client {
                 let mut stream = match client.subscribe_execution_payloads_v2(req).await {
                     Ok(stream) => stream.into_inner(),
                     Err(e) => {
-                        tracing::error!(error = ?e, "Error in execution payload stream, retrying...");
+                        error!(error = ?e, "Error in execution payload stream, retrying...");
                         tokio::time::sleep(Duration::from_secs(2)).await;
                         continue;
                     }
                 };
 
-                tracing::info!("Execution payload stream established");
+                info!("Execution payload stream established");
 
                 while let Some(item) = stream.next().await {
                     match item {
@@ -553,7 +589,7 @@ impl Client {
                                         .map(ExecutionPayload::V3)
                                 }
                                 _ => {
-                                    tracing::error!(
+                                    error!(
                                         data_version = payload.data_version,
                                         "Error deserializing execution payload: invalid data version"
                                     );
@@ -564,7 +600,7 @@ impl Client {
                             let execution_payload = match payload_deserialized {
                                 Ok(payload) => payload,
                                 Err(e) => {
-                                    tracing::error!(error = ?e, "Error deserializing execution payload");
+                                    error!(error = ?e, "Error deserializing execution payload");
                                     continue;
                                 }
                             };
@@ -575,7 +611,7 @@ impl Client {
                             let _ = tx.send(block);
                         }
                         Err(e) => {
-                            tracing::error!(error = ?e, "Error in execution payload stream, retrying...");
+                            error!(error = ?e, "Error in execution payload stream, retrying...");
                             // If we get an error, we set the inner stream to None and break out of the loop.
                             // Next iteration will retry the stream.
                             break;
@@ -584,6 +620,8 @@ impl Client {
                 }
             }
         });
+
+        self.background_tasks.lock().unwrap().push(handle);
 
         UnboundedReceiverStream::new(rx)
     }
@@ -593,14 +631,11 @@ impl Client {
     /// It will automatically retry every 2s if the stream fails.
     pub async fn subscribe_new_beacon_blocks(&self) -> impl Stream<Item = SignedBeaconBlock> {
         let key = self.key.clone();
-
-        let mut req = Request::new(());
-        append_metadata(&mut req, &key);
-
         let mut client = self.client.clone();
+
         let (tx, rx) = mpsc::unbounded_channel();
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             loop {
                 let mut req = Request::new(());
                 append_metadata(&mut req, &key);
@@ -608,13 +643,13 @@ impl Client {
                 let mut stream = match client.subscribe_beacon_blocks_v2(req).await {
                     Ok(stream) => stream.into_inner(),
                     Err(e) => {
-                        tracing::error!(error = ?e, "Error in beacon block stream, retrying...");
+                        error!(error = ?e, "Error in beacon block stream, retrying...");
                         tokio::time::sleep(Duration::from_secs(2)).await;
                         continue;
                     }
                 };
 
-                tracing::info!("Beacon block stream established");
+                info!("Beacon block stream established");
 
                 while let Some(item) = stream.next().await {
                     match item {
@@ -623,12 +658,12 @@ impl Client {
                                 let _ = tx.send(payload_deserialized);
                             }
                             Err(e) => {
-                                tracing::error!(error = ?e, "Error deserializing beacon block");
+                                error!(error = ?e, "Error deserializing beacon block");
                                 continue;
                             }
                         },
                         Err(e) => {
-                            tracing::error!(error = ?e, "Error in beacon block stream, retrying...");
+                            error!(error = ?e, "Error in beacon block stream, retrying...");
                             // If we get an error, we set the inner stream to None and break out of the loop.
                             // Next iteration will retry the stream.
                             break;
@@ -637,6 +672,8 @@ impl Client {
                 }
             }
         });
+
+        self.background_tasks.lock().unwrap().push(handle);
 
         UnboundedReceiverStream::new(rx)
     }
@@ -646,14 +683,11 @@ impl Client {
     /// It will automatically retry every 2s if the stream fails.
     pub async fn subscribe_new_raw_beacon_blocks(&self) -> impl Stream<Item = Bytes> {
         let key = self.key.clone();
-
-        let mut req = Request::new(());
-        append_metadata(&mut req, &key);
-
         let mut client = self.client.clone();
+
         let (tx, rx) = mpsc::unbounded_channel();
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             loop {
                 let mut req = Request::new(());
                 append_metadata(&mut req, &key);
@@ -661,13 +695,13 @@ impl Client {
                 let mut stream = match client.subscribe_beacon_blocks_v2(req).await {
                     Ok(stream) => stream.into_inner(),
                     Err(e) => {
-                        tracing::error!(error = ?e, "Error in beacon block stream, retrying...");
+                        error!(error = ?e, "Error in beacon block stream, retrying...");
                         tokio::time::sleep(Duration::from_secs(2)).await;
                         continue;
                     }
                 };
 
-                tracing::info!("Beacon block stream established");
+                info!("Beacon block stream established");
 
                 while let Some(item) = stream.next().await {
                     match item {
@@ -675,7 +709,7 @@ impl Client {
                             let _ = tx.send(item.ssz_block.into());
                         }
                         Err(e) => {
-                            tracing::error!(error = ?e, "Error in beacon block stream, retrying...");
+                            error!(error = ?e, "Error in beacon block stream, retrying...");
                             // If we get an error, we set the inner stream to None and break out of the loop.
                             // Next iteration will retry the stream.
                             break;
@@ -684,6 +718,8 @@ impl Client {
                 }
             }
         });
+
+        self.background_tasks.lock().unwrap().push(handle);
 
         UnboundedReceiverStream::new(rx)
     }

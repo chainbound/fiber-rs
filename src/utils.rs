@@ -1,9 +1,12 @@
-use alloy_rpc_types::{
-    AccessList, AccessListItem, Block, BlockTransactions, Header, Signature, Transaction,
+use alloy::{
+    consensus::{Block, BlockBody, Header, TxEnvelope},
+    eips::eip2718::Decodable2718,
+    primitives::{B256, B64, U256},
+    rpc::types::engine::ExecutionPayload,
+    rpc::types::Withdrawals,
 };
-use alloy_rpc_types_engine::ExecutionPayload;
-use reth_primitives::{TransactionSigned, B256, B64, U256};
 use tonic::Request;
+use tracing::error;
 
 const CLIENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 const CLIENT_NAME: &str = env!("CARGO_PKG_NAME");
@@ -29,104 +32,62 @@ pub(crate) fn append_metadata<T>(req: &mut Request<T>, api_key: &str) {
 }
 
 /// Parses an execution payload into a block.
-pub(crate) fn parse_execution_payload_to_block(payload: ExecutionPayload) -> Block {
+pub(crate) fn parse_execution_payload_to_block(payload: ExecutionPayload) -> Block<TxEnvelope> {
     let v1 = payload.as_v1();
 
     // Terminal difficulty (we don't support pre-Merge blocks)
-    let diff = U256::from(58750003716598352816469u128);
+    let difficulty = U256::from(58750003716598352816469u128);
 
     // NOTE: missing fields are set to `None` or ZERO, and documented in the library as such.
     let header = Header {
-        hash: Some(v1.block_hash),
-        total_difficulty: None,
+        difficulty,
+        nonce: B64::ZERO,
+        ommers_hash: B256::ZERO,
+        beneficiary: v1.fee_recipient,
         parent_hash: v1.parent_hash,
-        uncles_hash: B256::ZERO,
-        miner: v1.fee_recipient,
         state_root: v1.state_root,
         receipts_root: v1.receipts_root,
         logs_bloom: v1.logs_bloom,
-        difficulty: diff,
-        number: Some(v1.block_number),
-        gas_limit: v1.gas_limit as u128,
-        gas_used: v1.gas_used as u128,
+        number: v1.block_number,
+        gas_limit: v1.gas_limit,
+        gas_used: v1.gas_used,
         timestamp: v1.timestamp,
+        mix_hash: v1.prev_randao,
         extra_data: v1.extra_data.clone(),
-        mix_hash: Some(v1.prev_randao),
-        nonce: Some(B64::ZERO),
         base_fee_per_gas: Some(v1.base_fee_per_gas.to()),
-        blob_gas_used: payload.as_v3().map(|v3| v3.blob_gas_used as u128),
-        excess_blob_gas: payload.as_v3().map(|v3| v3.excess_blob_gas as u128),
+        blob_gas_used: payload.as_v3().map(|v3| v3.blob_gas_used),
+        excess_blob_gas: payload.as_v3().map(|v3| v3.excess_blob_gas),
+        target_blobs_per_block: None, // This field is missing in the ExecutonPayload.
         transactions_root: B256::ZERO, // This field is missing in the ExecutonPayload.
-        withdrawals_root: None,        // This field is missing in the ExecutonPayload.
+        withdrawals_root: None,       // This field is missing in the ExecutonPayload.
         parent_beacon_block_root: None, // This field is missing in the ExecutonPayload.
-        requests_root: None,           // This field is missing in the ExecutonPayload.
+        requests_hash: None,          // This field is missing in the ExecutonPayload.
     };
 
     let mut transactions = Vec::with_capacity(v1.transactions.len());
-    for (index, raw_transaction) in v1.transactions.iter().enumerate() {
-        let Ok(reth_tx) = TransactionSigned::decode_enveloped(&mut raw_transaction.as_ref()) else {
-            tracing::error!("failed to RLP-decode tx in block: {}", v1.block_hash);
-            continue;
-        };
-        let Some(sender) = reth_tx.recover_signer() else {
-            tracing::error!("failed to recover tx signer for tx: {}", reth_tx.hash);
-            continue;
-        };
-
-        let alloy_sig = Signature {
-            r: reth_tx.signature().r,
-            s: reth_tx.signature().s,
-            v: U256::from(reth_tx.signature().v(reth_tx.chain_id())),
-            y_parity: Some(reth_tx.signature().odd_y_parity.into()),
-        };
-
-        let alloy_acl = reth_tx.access_list().map(|reth_acl| {
-            AccessList(
-                reth_acl
-                    .iter()
-                    .map(|reth_item| AccessListItem {
-                        address: reth_item.address,
-                        storage_keys: reth_item.storage_keys.clone(),
-                    })
-                    .collect::<Vec<_>>(),
-            )
-        });
-
-        let alloy_tx = Transaction {
-            hash: reth_tx.hash,
-            nonce: reth_tx.nonce(),
-            block_hash: Some(v1.block_hash),
-            block_number: Some(v1.block_number),
-            transaction_index: Some(index as u64),
-            from: sender,
-            to: reth_tx.to(),
-            value: reth_tx.value(),
-            gas_price: Some(reth_tx.max_fee_per_gas()),
-            gas: reth_tx.gas_limit() as u128,
-            max_fee_per_gas: Some(reth_tx.max_fee_per_gas()),
-            max_priority_fee_per_gas: reth_tx.max_priority_fee_per_gas(),
-            max_fee_per_blob_gas: reth_tx.max_fee_per_blob_gas(),
-            input: reth_tx.input().clone(),
-            signature: Some(alloy_sig),
-            chain_id: reth_tx.chain_id(),
-            blob_versioned_hashes: reth_tx.blob_versioned_hashes(),
-            access_list: alloy_acl,
-            transaction_type: Some(u8::from(reth_tx.tx_type())),
-            other: Default::default(),
+    for raw_transaction in v1.transactions.iter() {
+        let alloy_tx = match TxEnvelope::decode_2718(&mut raw_transaction.as_ref()) {
+            Ok(enveloped) => enveloped,
+            Err(e) => {
+                error!("failed to decode tx in block: {}", e);
+                continue;
+            }
         };
 
         transactions.push(alloy_tx);
     }
-
-    let transactions = BlockTransactions::Full(transactions);
-    let withdrawals = payload.as_v3().map(|v3| v3.withdrawals().clone());
+    let withdrawals = match payload {
+        ExecutionPayload::V3(v3) => Some(Withdrawals::from(v3.payload_inner.withdrawals)),
+        ExecutionPayload::V2(v2) => Some(Withdrawals::from(v2.withdrawals)),
+        ExecutionPayload::V1(_) => None,
+    };
 
     Block {
         header,
-        transactions,
-        withdrawals,
-        size: None,
-        uncles: Vec::new(),
-        other: Default::default(),
+        body: BlockBody {
+            transactions,
+            ommers: Vec::new(),
+            withdrawals,
+        },
     }
 }

@@ -1,0 +1,4 @@
+[formatting]
+array_trailing_comma = false
+array_auto_collapse = true
+array_auto_expand = false

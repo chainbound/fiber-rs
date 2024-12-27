@@ -31,9 +31,7 @@ jobs:
       - uses: taiki-e/install-action@nextest
       - name: Run tests
         run: |
-          cargo nextest run \
-            --workspace \
-            -E "kind(lib) | kind(bin) | kind(proc-macro)"
+          cargo nextest run
 
   doc:
     name: doc tests
