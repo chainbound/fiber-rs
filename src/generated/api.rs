@@ -80,10 +80,10 @@ pub mod api_client {
         dead_code,
         missing_docs,
         clippy::wildcard_imports,
-        clippy::let_unit_value,
+        clippy::let_unit_value
     )]
-    use tonic::codegen::*;
     use tonic::codegen::http::Uri;
+    use tonic::codegen::*;
     #[derive(Debug, Clone)]
     pub struct ApiClient<T> {
         inner: tonic::client::Grpc<T>,
@@ -114,10 +114,7 @@ pub mod api_client {
             let inner = tonic::client::Grpc::with_origin(inner, origin);
             Self { inner }
         }
-        pub fn with_interceptor<F>(
-            inner: T,
-            interceptor: F,
-        ) -> ApiClient<InterceptedService<T, F>>
+        pub fn with_interceptor<F>(inner: T, interceptor: F) -> ApiClient<InterceptedService<T, F>>
         where
             F: tonic::service::Interceptor,
             T::ResponseBody: Default,
@@ -127,9 +124,8 @@ pub mod api_client {
                     <T as tonic::client::GrpcService<tonic::body::Body>>::ResponseBody,
                 >,
             >,
-            <T as tonic::codegen::Service<
-                http::Request<tonic::body::Body>,
-            >>::Error: Into<StdError> + std::marker::Send + std::marker::Sync,
+            <T as tonic::codegen::Service<http::Request<tonic::body::Body>>>::Error:
+                Into<StdError> + std::marker::Send + std::marker::Sync,
         {
             ApiClient::new(InterceptedService::new(inner, interceptor))
         }
@@ -172,20 +168,14 @@ pub mod api_client {
             tonic::Response<tonic::codec::Streaming<super::TransactionWithSenderMsg>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/api.API/SubscribeNewTxsV2",
-            );
+            let path = http::uri::PathAndQuery::from_static("/api.API/SubscribeNewTxsV2");
             let mut req = request.into_request();
-            req.extensions_mut().insert(GrpcMethod::new("api.API", "SubscribeNewTxsV2"));
+            req.extensions_mut()
+                .insert(GrpcMethod::new("api.API", "SubscribeNewTxsV2"));
             self.inner.server_streaming(req, path, codec).await
         }
         /// Opens a new blob transaction stream with the given filter.
@@ -196,18 +186,11 @@ pub mod api_client {
             tonic::Response<tonic::codec::Streaming<super::TransactionWithSenderMsg>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/api.API/SubscribeNewBlobTxs",
-            );
+            let path = http::uri::PathAndQuery::from_static("/api.API/SubscribeNewBlobTxs");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("api.API", "SubscribeNewBlobTxs"));
@@ -221,20 +204,14 @@ pub mod api_client {
             tonic::Response<tonic::codec::Streaming<super::TransactionResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/api.API/SendTransactionV2",
-            );
+            let path = http::uri::PathAndQuery::from_static("/api.API/SendTransactionV2");
             let mut req = request.into_streaming_request();
-            req.extensions_mut().insert(GrpcMethod::new("api.API", "SendTransactionV2"));
+            req.extensions_mut()
+                .insert(GrpcMethod::new("api.API", "SendTransactionV2"));
             self.inner.streaming(req, path, codec).await
         }
         /// Sends a sequence of signed, RLP encoded transactions to the network.
@@ -245,18 +222,11 @@ pub mod api_client {
             tonic::Response<tonic::codec::Streaming<super::TxSequenceResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/api.API/SendRawTransactionSequence",
-            );
+            let path = http::uri::PathAndQuery::from_static("/api.API/SendRawTransactionSequence");
             let mut req = request.into_streaming_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("api.API", "SendRawTransactionSequence"));
@@ -270,18 +240,12 @@ pub mod api_client {
             tonic::Response<tonic::codec::Streaming<super::ExecutionPayloadMsg>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/api.API/SubscribeExecutionPayloadsV2",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/api.API/SubscribeExecutionPayloadsV2");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("api.API", "SubscribeExecutionPayloadsV2"));
@@ -295,18 +259,11 @@ pub mod api_client {
             tonic::Response<tonic::codec::Streaming<super::BeaconBlockMsg>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/api.API/SubscribeBeaconBlocksV2",
-            );
+            let path = http::uri::PathAndQuery::from_static("/api.API/SubscribeBeaconBlocksV2");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("api.API", "SubscribeBeaconBlocksV2"));
@@ -317,27 +274,19 @@ pub mod api_client {
         /// a local timestamp as a confirmation that the block was seen and handled.
         pub async fn submit_block_stream(
             &mut self,
-            request: impl tonic::IntoStreamingRequest<
-                Message = super::BlockSubmissionMsg,
-            >,
+            request: impl tonic::IntoStreamingRequest<Message = super::BlockSubmissionMsg>,
         ) -> std::result::Result<
             tonic::Response<tonic::codec::Streaming<super::BlockSubmissionResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/api.API/SubmitBlockStream",
-            );
+            let path = http::uri::PathAndQuery::from_static("/api.API/SubmitBlockStream");
             let mut req = request.into_streaming_request();
-            req.extensions_mut().insert(GrpcMethod::new("api.API", "SubmitBlockStream"));
+            req.extensions_mut()
+                .insert(GrpcMethod::new("api.API", "SubmitBlockStream"));
             self.inner.streaming(req, path, codec).await
         }
     }
