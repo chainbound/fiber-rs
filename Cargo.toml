@@ -9,7 +9,7 @@ rust-version = "1.81"
 [dependencies]
 # ethereum
 ethereum-consensus = { git = "https://github.com/ralexstokes/ethereum-consensus", rev = "cf3c404" }
-ethereum_ssz = "0.8.1"
+ethereum_ssz = "0.8.3"
 alloy = { version = "0.8.3", features = [
     "ssz",
     "rlp",
@@ -25,12 +25,12 @@ tonic = { version = "0.10", features = ["gzip", "prost"] }
 prost = "0.12"
 
 # runtime
-tokio = { version = "1.21.1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.45.0", features = ["macros", "rt-multi-thread"] }
 tokio-stream = "0.1"
 
 # extra
 tracing = "0.1"
-thiserror = "2.0.9"
+thiserror = "2.0.12"
 
 [dev-dependencies]
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
