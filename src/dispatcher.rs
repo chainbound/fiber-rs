@@ -8,8 +8,8 @@ use tracing::{debug, error};
 
 use crate::{
     generated::api::{
-        api_client::ApiClient, BlockSubmissionMsg, BlockSubmissionResponse, TransactionMsg,
-        TransactionResponse, TxSequenceMsgV2, TxSequenceResponse,
+        api_client::ApiClient, BlockSubmissionMsg, BlockSubmissionResponse, RawTxSequenceMsg,
+        TransactionMsg, TransactionResponse, TxSequenceResponse,
     },
     utils::append_metadata,
 };
@@ -83,7 +83,7 @@ impl Dispatcher {
             // Append the request metadata
             append_metadata(&mut req, &api_key);
 
-            let mut new_tx_seq_responses = match client.send_transaction_sequence_v2(req).await {
+            let mut new_tx_seq_responses = match client.send_raw_transaction_sequence(req).await {
                 Ok(stream) => stream.into_inner(),
                 Err(e) => {
                     error!(error = ?e, "Error in transaction sequence stream, retrying...");
@@ -163,8 +163,8 @@ impl Dispatcher {
                         let rlp_transactions =
                             msg.into_iter().map(|tx| tx.encoded_2718()).collect();
 
-                        let sequence = TxSequenceMsgV2 {
-                            sequence: rlp_transactions,
+                        let sequence = RawTxSequenceMsg {
+                            raw_txs: rlp_transactions,
                         };
 
                         if new_tx_seq_sender.send(sequence).is_err() {
@@ -186,7 +186,7 @@ impl Dispatcher {
                     }
 
                     SendType::RawTransactionSequence { raw_txs, response } => {
-                        let sequence = TxSequenceMsgV2 { sequence: raw_txs };
+                        let sequence = RawTxSequenceMsg { raw_txs };
 
                         if new_tx_seq_sender.send(sequence).is_err() {
                             error!("Failed sending raw transaction sequence");

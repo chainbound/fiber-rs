@@ -8,9 +8,9 @@ rust-version = "1.81"
 
 [dependencies]
 # ethereum
-ethereum-consensus = { git = "https://github.com/ralexstokes/ethereum-consensus", rev = "cf3c404" }
-ethereum_ssz = "0.8.1"
-alloy = { version = "0.8.3", features = [
+ethereum-consensus = { git = "https://github.com/ralexstokes/ethereum-consensus", rev = "ba43147" }
+ethereum_ssz = "0.9.0"
+alloy = { version = "0.15", features = [
     "ssz",
     "rlp",
     "eips",
@@ -21,8 +21,8 @@ alloy = { version = "0.8.3", features = [
 ] }
 
 # grpc
-tonic = { version = "0.10", features = ["gzip", "prost"] }
-prost = "0.12"
+tonic = { version = "0.13", features = ["gzip", "prost"] }
+prost = "0.13"
 
 # runtime
 tokio = { version = "1.21.1", features = ["macros", "rt-multi-thread"] }
@@ -36,4 +36,4 @@ thiserror = "2.0.9"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [build-dependencies]
-tonic-build = "0.10"
+tonic-build = "0.13"

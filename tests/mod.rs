@@ -4,7 +4,7 @@ use alloy::{
     consensus::{SignableTransaction, Transaction, TxEip1559, TxEnvelope, TxType},
     eips::eip2718::Decodable2718,
     hex,
-    primitives::{b256, Address, PrimitiveSignature, TxHash, TxKind, U256},
+    primitives::{b256, Address, Signature, TxHash, TxKind, U256},
     rpc::types::AccessList,
 };
 use ethereum_consensus::{ssz::prelude::deserialize, types::mainnet::SignedBeaconBlock};
@@ -67,7 +67,7 @@ async fn test_new_blob_transactions() {
     while let Some(tx) = sub.next().await {
         println!(
             "blobs: {}, time since last: {:?}",
-            tx.tx().tx().sidecar.blobs.len(),
+            tx.inner().tx().sidecar.blobs.len(),
             start.elapsed()
         );
         start = std::time::Instant::now();
@@ -195,7 +195,7 @@ async fn test_send_tx() {
             access_list: AccessList::default(),
     };
 
-    let sig = PrimitiveSignature::from_scalars_and_parity(
+    let sig = Signature::from_scalars_and_parity(
         b256!("840cfc572845f5786e702984c2a582528cad4b49b2a10b9db1be7fca90058565"),
         b256!("25e7109ceb98168d95b09b18bbf6b685130e0562f233877d492b94eee0c5b6d1"),
         false,

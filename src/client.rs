@@ -108,7 +108,7 @@ impl Client {
         api_key: impl Into<String>,
         opts: ClientOptions,
     ) -> FiberResult<Client> {
-        let target = target.into();
+        let target: String = target.into();
         let api_key = api_key.into();
 
         let targetstr = if !target.starts_with("http://") {
@@ -606,9 +606,10 @@ impl Client {
                             };
 
                             // Parse an ExecutionPayload into a Block
-                            let block = parse_execution_payload_to_block(execution_payload);
-
-                            let _ = tx.send(block);
+                            if let Some(block) = parse_execution_payload_to_block(execution_payload)
+                            {
+                                let _ = tx.send(block);
+                            }
                         }
                         Err(e) => {
                             error!(error = ?e, "Error in execution payload stream, retrying...");

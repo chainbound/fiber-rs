@@ -2,7 +2,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tonic_build::configure()
         .build_server(false)
         .out_dir("src/generated") // you can change the generated code's location
-        .compile(
+        .compile_protos(
             &[
                 // "./fiber-proto/types.proto", uncomment this line if you have a dependency on types.proto
                 // "./fiber-proto/eth.proto", uncomment this line if you have a dependency on eth.proto
