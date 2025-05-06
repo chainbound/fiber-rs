@@ -4,7 +4,7 @@ version = "0.8.1"
 edition = "2021"
 license = "MIT"
 authors = ["Chainbound <admin@chainbound.io>"]
-rust-version = "1.81"
+rust-version = "1.82"
 
 [dependencies]
 # ethereum
