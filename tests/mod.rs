@@ -169,8 +169,8 @@ async fn test_send_raw_tx() {
         hex::decode("02f872018307910d808507204d2cb1827d0094388c818ca8b9251b393131c08a736a67ccb19297880320d04823e2701c80c001a0cf024f4815304df2867a1a74e9d2707b6abda0337d2d54a4438d453f4160f190a07ac0e6b3bc9395b5b9c8b9e6d77204a236577a5b18467b9175c01de4faa208d9").unwrap();
 
     let (tx_hash, timestamp) = client.send_raw_transaction(raw_tx_bytes).await.unwrap();
-    println!("tx_hash: {}", tx_hash);
-    println!("timestamp: {}", timestamp);
+    println!("tx_hash: {tx_hash}");
+    println!("timestamp: {timestamp}");
 }
 
 #[tokio::test]
@@ -211,8 +211,8 @@ async fn test_send_tx() {
     assert_eq!(*signed_tx.tx_hash(), hash, "Expected same hash");
 
     let (tx_hash, timestamp) = client.send_transaction(signed_tx).await.unwrap();
-    println!("tx_hash: {}", tx_hash);
-    println!("timestamp: {}", timestamp);
+    println!("tx_hash: {tx_hash}");
+    println!("timestamp: {timestamp}");
 
     println!("expected: 0x{}", hex::encode(hash.0));
 
