@@ -18,7 +18,7 @@ pub(crate) fn append_api_key<T>(req: &mut Request<T>, key: &str) {
 
 /// Appends the client version metadata to the request, keyed by x-client-version.
 pub(crate) fn append_client_version<T>(req: &mut Request<T>) {
-    let client_full_name = format!("{}-rs/v{}", CLIENT_NAME, CLIENT_VERSION);
+    let client_full_name = format!("{CLIENT_NAME}-rs/v{CLIENT_VERSION}");
     req.metadata_mut()
         .append("x-client-version", client_full_name.parse().unwrap());
 }
