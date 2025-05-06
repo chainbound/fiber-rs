@@ -36,6 +36,7 @@ use crate::{Dispatcher, SendType};
 const BELLATRIX_DATA_VERSION: u32 = 3;
 const CAPELLA_DATA_VERSION: u32 = 4;
 const DENEB_DATA_VERSION: u32 = 5;
+const ELECTRA_DATA_VERSION: u32 = 6;
 
 /// Error type for the Fiber client.
 #[derive(Debug, thiserror::Error)]
@@ -585,6 +586,10 @@ impl Client {
                                         .map(ExecutionPayload::V2)
                                 }
                                 DENEB_DATA_VERSION => {
+                                    ExecutionPayloadV3::from_ssz_bytes(&payload.ssz_payload)
+                                        .map(ExecutionPayload::V3)
+                                }
+                                ELECTRA_DATA_VERSION => {
                                     ExecutionPayloadV3::from_ssz_bytes(&payload.ssz_payload)
                                         .map(ExecutionPayload::V3)
                                 }
