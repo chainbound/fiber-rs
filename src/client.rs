@@ -24,7 +24,11 @@ use tokio::{
     task::JoinHandle,
 };
 use tokio_stream::{wrappers::UnboundedReceiverStream, Stream, StreamExt};
-use tonic::{codec::CompressionEncoding, transport::Channel, Request};
+use tonic::{
+    codec::CompressionEncoding,
+    transport::{Channel, Endpoint},
+    Request,
+};
 use tracing::{debug, error, info, trace};
 
 use crate::generated::api::{
@@ -58,6 +62,7 @@ pub(crate) type FiberResult<T> = std::result::Result<T, FiberError>;
 pub struct ClientOptions {
     send_compressed: bool,
     accept_compressed: bool,
+    keep_alive_interval: Option<Duration>,
 }
 
 impl ClientOptions {
@@ -70,6 +75,13 @@ impl ClientOptions {
     /// Enables GZIP compression for incoming data.
     pub const fn accept_compressed(mut self, accept_compressed: bool) -> Self {
         self.accept_compressed = accept_compressed;
+        self
+    }
+
+    /// Sets the HTTP/2 keep-alive interval for the client.
+    /// The timeout is hardcoded to 10 seconds.
+    pub const fn keep_alive_interval(mut self, interval: Duration) -> Self {
+        self.keep_alive_interval = Some(interval);
         self
     }
 }
@@ -115,12 +127,27 @@ impl Client {
         let targetstr = if !target.starts_with("http://") {
             "http://".to_owned() + &target
         } else {
-            target
+            target.to_string()
         };
 
-        // Set up the inner gRPC connection
-        let mut client = ApiClient::connect(targetstr.to_owned()).await?;
+        // Create an Endpoint from the target string
+        let mut endpoint = Endpoint::from_shared(targetstr.clone())?;
 
+        // Conditionally apply keepalive settings
+        if let Some(interval) = opts.keep_alive_interval {
+            endpoint = endpoint
+                .http2_keep_alive_interval(interval)
+                .keep_alive_timeout(Duration::from_secs(10))
+                .keep_alive_while_idle(true);
+        }
+
+        // Connect using the configured endpoint
+        let channel = endpoint.connect().await?;
+
+        // Create the ApiClient with the channel
+        let mut client = ApiClient::new(channel);
+
+        // Configure compression on the ApiClient
         if opts.accept_compressed {
             client = client.accept_compressed(CompressionEncoding::Gzip);
         }
@@ -137,7 +164,7 @@ impl Client {
             client: client.clone(),
         };
 
-        let client = Client {
+        let client_struct = Client {
             client,
             key: api_key,
             cmd_tx,
@@ -146,7 +173,7 @@ impl Client {
 
         tokio::task::spawn(dispatcher.run());
 
-        Ok(client)
+        Ok(client_struct)
     }
 
     /// Kills all background tasks spawned by the client.
